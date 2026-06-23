@@ -6,7 +6,7 @@
 [![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v6.0.1-green)](https://docs.espressif.com/projects/esp-idf/en/v6.0.1)
 [![Display](https://img.shields.io/badge/Display-ST7789%20240%C3%97320-orange)]()
 
-一个基于 ESP32-S3 开发板与 2.0 英寸 ST7789 TFT 彩色屏的图形显示 Demo，包含纯色填充、几何图形、嵌入式图片、文字居中显示等基本功能。
+一个基于 ESP32-S3 开发板与 2.0 英寸 ST7789 TFT 彩色屏的**交互式图形应用**，包含主菜单、图片浏览器、走马灯和 GIF 播放器，支持按键交互与背景音乐播放。
 
 ---
 
@@ -14,9 +14,11 @@
 
 | 组件       | 型号 / 规格                               | 数量 |
 | ---------- | ----------------------------------------- | ---- |
-| 开发板     | HW-678ABCD (ESP32-S3-WROOM-1)             | 1    |
+| 开发板     | HW-678ABCD (ESP32-S3-WROOM-1-N16R8)       | 1    |
 | TFT 彩色屏 | 可爱橙 KAC-N200-2432KHWIG20-A8 (ST7789V2) | 1    |
-| 连接线     | 杜邦线 (母-母) × 8                       | 8 根 |
+| 音频 DAC   | MAX98357A I2S 功放模块 + 喇叭              | 1    |
+| 按键       | 轻触开关 (UP/DOWN/LEFT/RIGHT)              | 4    |
+| 连接线     | 杜邦线 (母-母)                             | 若干 |
 | USB 数据线 | Type-C                                    | 1    |
 
 ---
@@ -35,6 +37,23 @@
 | **GND**     | Pin 1 (GND)     | Ground    | 电源地            |
 
 > ⚠️ **背光直接接 3.3V 即常亮**，如需调光可将 BLK 接 GPIO 通过 PWM 控制。
+
+### 按键接线
+
+| ESP32-S3 GPIO | 按键 | 模式 | 说明 |
+|:---:|:---:|------|------|
+| GPIO17 | UP    | INPUT_PULLUP | 按下 = GND |
+| GPIO3  | DOWN  | INPUT_PULLUP | ⚠️ Strapping 引脚 (JTAG)，运行时可用 |
+| GPIO8  | LEFT  | INPUT_PULLUP | 按下 = GND |
+| GPIO18 | RIGHT | INPUT_PULLUP | 按下 = GND |
+
+### 音频接线
+
+| ESP32-S3 GPIO | MAX98357A 引脚 | 信号 | 说明 |
+|:---:|------|------|------|
+| GPIO5  | BCLK | I2S 位时钟 | |
+| GPIO4  | LRCLK | I2S 声道时钟 | |
+| GPIO6  | DIN | I2S 音频数据 | |
 
 ```
 ESP32-S3 (HW-678)              TFT-LCD (8-Pin)
@@ -57,33 +76,43 @@ ESP32-S3 (HW-678)              TFT-LCD (8-Pin)
 ```
 box-demo/
 ├── main/
-│   ├── CMakeLists.txt      # 组件注册 (LovyanGFX)
-│   ├── main.cpp            # 主程序: init → 颜色 → 图形 → 图片 → 文字
-│   ├── lgfx_conf.h         # LovyanGFX 配置 (ST7789 + SPI3)
+│   ├── CMakeLists.txt      # 组件注册 (LovyanGFX + spiffs)
+│   ├── main.cpp            # 主程序: 状态机 + 菜单 + 3 个子功能 + 音频任务
+│   ├── lgfx_conf.h         # LovyanGFX 配置 (ST7789 + SPI3_HOST + DMA)
 │   └── lcd_image.h         # 嵌入式测试图片 (40×40 RGB565)
 ├── components/
 │   └── LovyanGFX/          # 图形库 (本地克隆)
-├── docs/                   # 📚 详细文档
+├── resource/               # 运行时资源 (SPIFFS 镜像源)
+│   ├── 0001~0003.png       # 图片浏览器测试图
+│   ├── gif_0001~0028.png   # GIF 动画帧 (28 帧 200×200)
+│   ├── 500x150.raw         # 走马灯图片 (RGB565)
+│   └── music.wav           # 背景音乐 (22050Hz 16-bit Mono)
+├── docs/                   # 📚 详细文档 (9 篇)
 │   ├── esp32-s3-board.md   # 开发板完整规格
-│   ├── hardware-wiring.md  # 接线详解 + GPIO矩阵分析
+│   ├── hardware-wiring.md  # 接线详解 + GPIO 矩阵分析
 │   ├── tft-lcd-specs.md    # TFT 完整规格 + ST7789 寄存器
-│   └── diji-nes-reference.md # DIJI-NES 参考分析
-├── DIJI-NES-main/          # 参考项目 (NES 模拟器)
-├── 可爱橙彩色屏/           # 厂商原始资料
-├── HW-678ABCD共用产品说明书v0.0.0.pdf
-└── CMakeLists.txt          # 顶层项目文件
+│   ├── diji-nes-reference.md # DIJI-NES 参考分析
+│   ├── audio-subsystem.md  # 音频子系统 (I2S + MAX98357A)
+│   ├── button-system.md    # 按键交互系统 (边缘检测)
+│   ├── app-architecture.md # 应用架构 (状态机 + 生命周期)
+│   ├── build-config.md     # 构建与配置指南
+│   ├── lovyangfx-sprite-image-guide.md # 开发踩坑记录
+│   └── cloud-asr-plan.md   # 未来规划: WiFi 云端语音识别
+└── CMakeLists.txt          # 顶层项目文件 (SPIFFS 镜像生成)
 ```
 
 ### 技术栈
 
 | 层级     | 技术选择                           |
 | -------- | ---------------------------------- |
-| 芯片     | ESP32-S3 (Xtensa LX7 双核)         |
+| 芯片     | ESP32-S3-N16R8 (Xtensa LX7 双核 240MHz, 16MB Flash, 8MB PSRAM) |
 | RTOS     | FreeRTOS (ESP-IDF 内置)            |
 | 构建系统 | ESP-IDF v6.0.1 + CMake             |
-| 图形库   | **LovyanGFX** (本地组件克隆) |
-| 显示屏   | ST7789V2, 240×320, SPI, RGB565    |
-| 语言     | C++17 (`.cpp`)                   |
+| 图形库   | **LovyanGFX** (本地组件克隆)        |
+| 显示屏   | ST7789V2, 240×320, SPI3_HOST, DMA, RGB565 |
+| 音频     | I2S0 标准模式 TX → MAX98357A (22050Hz 16-bit Mono) |
+| 存储     | SPIFFS (4MB 分区，存放图片/音频资源) |
+| 语言     | C++17 (`.cpp`)                     |
 
 ---
 
@@ -124,41 +153,71 @@ idf.py build flash -p COM7
 
 ---
 
-## 🎬 Demo 演示流程
+## � 应用功能
 
-运行后屏幕依次展示：
+启动后进入**主菜单**，通过 4 个方向键交互，选择并进入子功能。
 
-| 步骤 | 内容                 | 时长 | 说明                                  |
-| ---- | -------------------- | ---- | ------------------------------------- |
-| 1    | **纯色填充**   | 5 秒 | 红 → 绿 → 蓝 → 白 → 黑，每色 1 秒 |
-| 2    | **几何图形**   | 2 秒 | 双层边框 + 十字线 + 四角色块          |
-| 3    | **嵌入式图片** | 2 秒 | 40×40 RGB565 测试图 (四象限)         |
-| 4    | **居中文字**   | 持续 | 标题 + 分隔线 + 信息 + 签名           |
+### 按键操作
 
-### 测试图片说明
+| 按键 | 菜单 | 子功能内 |
+|:---:|------|------|
+| **UP** | 上移选择 | 取消退出 (弹窗中) |
+| **DOWN** | 下移选择 | 弹出退出确认窗 |
+| **LEFT** | — | 上一张 / 减速 (GIF) |
+| **RIGHT** | 确认进入 | 下一张 / 加速 (GIF) |
 
-`lcd_image.h` 中的测试图片为 40×40 像素 RGB565 格式：
+### 功能一：图片浏览器 (IMG Browser)
 
-```
-┌─────────────────────┐
-│  RED    │  GREEN    │  ← 上半部分
-│ (0xF800)│ (0x07E0)  │
-├─────────┼───────────┤
-│  BLUE   │  YELLOW   │  ← 下半部分
-│ (0x001F)│ (0xFFE0)  │
-└─────────────────────┘
-```
+- 自动扫描 `/spiffs/` 下 `0001.png` ~ `0099.png`
+- PNG 解码后居中显示，LEFT/RIGHT 翻页
+- 尺寸缓存避免重复解析 PNG 头部
+
+### 功能二：图片走马灯 (IMG Marquee)
+
+- 加载 `500x150.raw` (RGB565) 到 PSRAM
+- 双缓冲 `pushImage` 实现无缝横向滚动
+- 自动推进，约 33fps
+
+### 功能三：GIF 播放器 (GIF Player)
+
+- 28 帧 200×200 PNG 序列帧，预加载到 PSRAM Sprite 数组 (~2.24 MB)
+- LEFT/RIGHT 调速 (1~20 级，对应 25~500ms 帧间隔)
+- 帧序号 + 速度条实时显示
+
+### 背景音乐
+
+- 进入任意子功能自动播放 `/spiffs/music.wav`
+- 22050Hz 16-bit Mono PCM，I2S0 TX → MAX98357A
+- 退出子功能自动停止，循环播放
 
 ---
 
 ## 📚 文档索引
 
-| 文档                                                  | 内容                                |
-| ----------------------------------------------------- | ----------------------------------- |
-| [docs/esp32-s3-board.md](docs/esp32-s3-board.md)         | HW-678 开发板完整规格、引脚表、外设 |
-| [docs/hardware-wiring.md](docs/hardware-wiring.md)       | 接线图、GPIO 矩阵分析、SPI 方案     |
-| [docs/tft-lcd-specs.md](docs/tft-lcd-specs.md)           | ST7789V2 完整参数、寄存器对照       |
-| [docs/diji-nes-reference.md](docs/diji-nes-reference.md) | DIJI-NES 架构分析与可复用模式       |
+### 硬件
+
+| 文档 | 内容 |
+|------|------|
+| [docs/esp32-s3-board.md](docs/esp32-s3-board.md) | HW-678 开发板完整规格、41 Pin 引脚表、Strapping 警告 |
+| [docs/hardware-wiring.md](docs/hardware-wiring.md) | TFT 接线图、GPIO 矩阵分析、SPI3_HOST 方案详解 |
+| [docs/tft-lcd-specs.md](docs/tft-lcd-specs.md) | ST7789V2 完整参数、电学/光学特性、初始化序列 |
+
+### 软件
+
+| 文档 | 内容 |
+|------|------|
+| [docs/app-architecture.md](docs/app-architecture.md) | 三级状态机、退出弹窗、音频生命周期、内存策略 |
+| [docs/audio-subsystem.md](docs/audio-subsystem.md) | I2S 配置、MAX98357A、WAV 播放任务 |
+| [docs/button-system.md](docs/button-system.md) | 4 键接线、边缘检测状态机、盲区补偿 |
+| [docs/build-config.md](docs/build-config.md) | sdkconfig 关键项、分区表、SPIFFS 资源管理、编译烧录 |
+
+### 参考
+
+| 文档 | 内容 |
+|------|------|
+| [docs/diji-nes-reference.md](docs/diji-nes-reference.md) | DIJI-NES 原型完整分析、硬件对比、可复用方案 |
+| [docs/lovyangfx-sprite-image-guide.md](docs/lovyangfx-sprite-image-guide.md) | 开发踩坑记录：SPIFFS 兼容、PSRAM、按键防抖 |
+| [docs/cloud-asr-plan.md](docs/cloud-asr-plan.md) | 🚧 未来规划：WiFi 云端语音识别方案 |
 
 ---
 
