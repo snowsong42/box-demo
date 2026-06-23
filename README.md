@@ -1,4 +1,4 @@
-# BUTT-demo
+# box-demo
 
 > **ESP32-S3 (HW-678) + 可爱橙 2.0" TFT (ST7789) + ESP-IDF v6.0.1 + LovyanGFX**
 
@@ -55,7 +55,7 @@ ESP32-S3 (HW-678)              TFT-LCD (8-Pin)
 ## 🏗️ 软件架构
 
 ```
-BUTT-demo/
+box-demo/
 ├── main/
 │   ├── CMakeLists.txt      # 组件注册 (LovyanGFX)
 │   ├── main.cpp            # 主程序: init → 颜色 → 图形 → 图片 → 文字

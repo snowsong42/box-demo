@@ -5,6 +5,8 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_spiffs.h"
+#include "esp_heap_caps.h"
+#include "driver/i2s_std.h"
 #include "esp_log.h"
 #include "lgfx_conf.h"
 
@@ -25,9 +27,6 @@
 #define BTN_LEFT   GPIO_NUM_8
 #define BTN_RIGHT  GPIO_NUM_18
 
-// ==================== 防抖参数 ====================
-static const int64_t BUTTON_DEBOUNCE_MS = 200;
-
 // ==================== 按键返回值 ====================
 #define BTN_NONE  0
 #define BTN_U     1
@@ -46,10 +45,10 @@ static AppState current_state = STATE_MENU;
 
 // ==================== 全局实例 ====================
 static LGFX tft;
-static const char* TAG = "BUTT-demo";
+static const char* TAG = "box-demo";
 
-// ==================== 按键状态 ====================
-static int64_t last_button_time = 0;
+// ==================== 按键状态 (边缘检测) ====================
+static int prev_btn = BTN_NONE;
 
 // ==================== 菜单状态 ====================
 static int menu_selection = 0; // 0=图片浏览器, 1=图片走马灯, 2=简易GIF动图
@@ -59,8 +58,6 @@ static int img_index = 0;
 static int img_count = 0;
 
 // ==================== 走马灯状态 ====================
-static LGFX_Sprite marquee_spr;
-static bool marquee_spr_created = false;
 static int scroll_offset = 0;
 
 // ==================== GIF 状态 ====================
@@ -77,6 +74,12 @@ static int64_t gif_last_frame_time = 0;
 static bool img_exit_popup = false;
 static bool marquee_exit_popup = false;
 static bool gif_exit_popup = false;
+
+// ==================== 音频播放状态 ====================
+static bool audio_running = false;
+static TaskHandle_t audio_task_handle = nullptr;
+static i2s_chan_handle_t tx_chan = nullptr;
+static void audio_playback_task(void* arg);
 
 // ==================== 函数声明 ====================
 static void init_buttons();
@@ -110,31 +113,26 @@ static void init_buttons() {
     ESP_LOGI(TAG, "Buttons: UP=17 DOWN=3 LEFT=8 RIGHT=18");
 }
 
-/// 等待指定按键释放（防止长按穿透到下一状态）
-static void wait_button_release(gpio_num_t btn) {
-    while (gpio_get_level(btn) == 0) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    last_button_time = esp_timer_get_time() / 1000; // 释放后重置防抖
+/// 边缘检测按键读取：仅在下沿（松→按）返回事件，长按不重复触发
+static int read_buttons() {
+    int curr = BTN_NONE;
+    if (gpio_get_level(BTN_UP) == 0)    curr = BTN_U;
+    if (gpio_get_level(BTN_DOWN) == 0)  curr = BTN_D;
+    if (gpio_get_level(BTN_LEFT) == 0)  curr = BTN_L;
+    if (gpio_get_level(BTN_RIGHT) == 0) curr = BTN_R;
+
+    int event = (curr != BTN_NONE && curr != prev_btn) ? curr : BTN_NONE;
+    prev_btn = curr;
+    return event;
 }
 
-/// 带防抖的按键读取，返回 BTN_U/D/L/R 或 BTN_NONE
-static int read_buttons() {
-    int64_t now = esp_timer_get_time() / 1000;
-    if (now - last_button_time < BUTTON_DEBOUNCE_MS) {
-        return BTN_NONE;
-    }
-
-    int pressed = BTN_NONE;
-    if (gpio_get_level(BTN_UP) == 0)    pressed = BTN_U;
-    if (gpio_get_level(BTN_DOWN) == 0)  pressed = BTN_D;
-    if (gpio_get_level(BTN_LEFT) == 0)  pressed = BTN_L;
-    if (gpio_get_level(BTN_RIGHT) == 0) pressed = BTN_R;
-
-    if (pressed != BTN_NONE) {
-        last_button_time = now;
-    }
-    return pressed;
+/// 长绘图后重新校准边缘检测（防止盲区丢失边沿）
+static void sync_button_state() {
+    prev_btn = BTN_NONE;
+    if (gpio_get_level(BTN_UP) == 0)       prev_btn = BTN_U;
+    else if (gpio_get_level(BTN_DOWN) == 0) prev_btn = BTN_D;
+    else if (gpio_get_level(BTN_LEFT) == 0) prev_btn = BTN_L;
+    else if (gpio_get_level(BTN_RIGHT) == 0) prev_btn = BTN_R;
 }
 
 // ==================== SPIFFS 初始化 ====================
@@ -274,13 +272,14 @@ static void draw_confirm_popup() {
 
 // ---------- 绘制主菜单 ----------
 static void draw_menu() {
-    tft.fillScreen(COLOR_BLACK);
+    tft.startWrite();
+    tft.fillRect(0, 0, 320, 240, COLOR_BLACK);
 
     // 标题
     tft.setTextColor(COLOR_WHITE);
     tft.setTextSize(4);
     tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("BUTT-demo", 160, TITLE_Y);
+    tft.drawString("box-demo", 160, TITLE_Y);
 
     // 表格外框
     tft.drawRect(TBL_X, TBL_Y, TBL_W, TBL_H, COLOR_WHITE);
@@ -317,6 +316,8 @@ static void draw_menu() {
     tft.drawString("[UP][DOWN] Select    [RIGHT] Enter", 160, HINT_Y);
 
     if (menu_popup) draw_confirm_popup();
+    tft.endWrite();
+    sync_button_state();
 }
 
 // ---------- 处理菜单按键 ----------
@@ -348,7 +349,6 @@ static void handle_menu(int btn) {
         case BTN_R:
             menu_popup = true;
             draw_menu();
-            wait_button_release(BTN_RIGHT);
             break;
     }
 }
@@ -360,7 +360,8 @@ static int img_w_cache[100];
 static int img_h_cache[100];
 
 static void draw_img_browser() {
-    tft.fillScreen(COLOR_BLACK);
+    tft.startWrite();
+    tft.fillRect(0, 0, 320, 20, COLOR_BLACK);
 
     int idx = img_index + 1;
     char buf[64];
@@ -400,7 +401,7 @@ static void draw_img_browser() {
             fseek(fp, 0, SEEK_END);
             long fsize = ftell(fp);
             fseek(fp, 0, SEEK_SET);
-            uint8_t* png_buf = (uint8_t*)malloc(fsize);
+            uint8_t* png_buf = (uint8_t*)heap_caps_malloc(fsize, MALLOC_CAP_SPIRAM);
             if (png_buf) {
                 fread(png_buf, 1, fsize, fp);
                 if (!tft.drawPng(png_buf, fsize, x, y)) {
@@ -408,9 +409,9 @@ static void draw_img_browser() {
                     tft.setTextColor(COLOR_RED);
                     tft.drawString("PNG decode fail!", 160, 120);
                 }
-                free(png_buf);
+                heap_caps_free(png_buf);
             } else {
-                ESP_LOGE(TAG, "IMG malloc(%ld) failed", fsize);
+                ESP_LOGE(TAG, "IMG PSRAM alloc(%ld) failed", fsize);
             }
             fclose(fp);
         }
@@ -422,17 +423,31 @@ draw_hint:
     tft.setTextDatum(textdatum_t::middle_center);
     tft.drawString("[LEFT]Prev [RIGHT]Next [DOWN]Exit", 160, 230);
 
+    tft.fillRect(0, 220, 320, 20, COLOR_BLACK);
     if (img_exit_popup) draw_exit_popup();
+    tft.endWrite();
+    sync_button_state();
 }
 
 static void handle_img(int btn) {
     if (img_need_init) {
+        tft.fillScreen(COLOR_BLACK);
+        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
+        tft.setTextDatum(textdatum_t::middle_center);
+        tft.drawString("Loading...", 160, 120);
+
         img_count = detect_img_count();
         img_index = 0;
         img_need_init = false;
         img_exit_popup = false;
         memset(img_w_cache, 0, sizeof(img_w_cache));
         memset(img_h_cache, 0, sizeof(img_h_cache));
+
+        if (!audio_running) {
+            audio_running = true;
+            i2s_channel_enable(tx_chan);
+            xTaskCreate(audio_playback_task, "audio", 4096, NULL, 1, &audio_task_handle);
+        }
         draw_img_browser();
         return;
     }
@@ -440,6 +455,8 @@ static void handle_img(int btn) {
     if (img_exit_popup) {
         if (btn == BTN_D) {
             img_exit_popup = false;
+            audio_running = false;
+            i2s_channel_disable(tx_chan);
             current_state = STATE_MENU;
             img_need_init = true;
             return;
@@ -464,20 +481,27 @@ static void handle_img(int btn) {
         case BTN_D:
             img_exit_popup = true;
             draw_img_browser();
-            wait_button_release(BTN_DOWN);
             break;
     }
 }
 
 // ==================== 功能二：图片走马灯 ====================
 
+#define MARQUEE_W 500
+#define MARQUEE_H 150
+
 static bool marquee_need_init = true;
+static uint16_t* marquee_raw = nullptr;
 
 static void draw_marquee_frame() {
-    tft.fillScreen(COLOR_BLACK);
+    tft.startWrite();
 
-    marquee_spr.pushSprite(&tft, -scroll_offset, 45, COLOR_BLACK);
-    marquee_spr.pushSprite(&tft, 500 - scroll_offset, 45, COLOR_BLACK);
+    if (marquee_raw) {
+        tft.setSwapBytes(true);
+        tft.pushImage(-scroll_offset, 45, MARQUEE_W, MARQUEE_H, marquee_raw);
+        tft.pushImage(MARQUEE_W - scroll_offset, 45, MARQUEE_W, MARQUEE_H, marquee_raw);
+        tft.setSwapBytes(false);
+    }
 
     tft.setTextColor(COLOR_WHITE);
     tft.setTextSize(1);
@@ -488,17 +512,40 @@ static void draw_marquee_frame() {
     tft.drawString("[DOWN]Exit", 160, 230);
 
     if (marquee_exit_popup) draw_exit_popup();
+    tft.endWrite();
+    sync_button_state();
 }
 
 static void handle_marquee(int btn) {
     if (marquee_need_init) {
+        tft.fillScreen(COLOR_BLACK);
+        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
+        tft.setTextDatum(textdatum_t::middle_center);
+        tft.drawString("Loading...", 160, 120);
+
         marquee_exit_popup = false;
         scroll_offset = 0;
-        if (marquee_spr_created) { marquee_spr.deleteSprite(); marquee_spr_created = false; }
-        marquee_spr.createSprite(500, 150);
-        marquee_spr_created = true;
-        marquee_spr.drawJpgFile("/spiffs/500x150.jpg", 0, 0);
+        if (!marquee_raw) {
+            FILE* fp = fopen("/spiffs/500x150.raw", "rb");
+            if (fp) {
+                size_t sz = MARQUEE_W * MARQUEE_H * 2;
+                marquee_raw = (uint16_t*)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
+                if (marquee_raw) {
+                    fread(marquee_raw, 1, sz, fp);
+                    ESP_LOGI(TAG, "Marquee raw loaded: %dx%d", MARQUEE_W, MARQUEE_H);
+                }
+                fclose(fp);
+            } else {
+                ESP_LOGE(TAG, "Marquee raw fopen failed");
+            }
+        }
         marquee_need_init = false;
+
+        if (!audio_running) {
+            audio_running = true;
+            i2s_channel_enable(tx_chan);
+            xTaskCreate(audio_playback_task, "audio", 4096, NULL, 1, &audio_task_handle);
+        }
         draw_marquee_frame();
         return;
     }
@@ -506,6 +553,9 @@ static void handle_marquee(int btn) {
     if (marquee_exit_popup) {
         if (btn == BTN_D) {
             marquee_exit_popup = false;
+            audio_running = false;
+            i2s_channel_disable(tx_chan);
+            if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
             current_state = STATE_MENU;
             marquee_need_init = true;
             return;
@@ -521,11 +571,10 @@ static void handle_marquee(int btn) {
     if (btn == BTN_D) {
         marquee_exit_popup = true;
         draw_marquee_frame();
-        wait_button_release(BTN_DOWN);
         return;
     }
 
-    scroll_offset = (scroll_offset + 2) % 500;
+    scroll_offset = (scroll_offset + 2) % MARQUEE_W;
     draw_marquee_frame();
 }
 
@@ -535,17 +584,42 @@ static bool gif_need_init = true;
 
 static void load_gif_frames() {
     ESP_LOGI(TAG, "Loading %d GIF frames...", GIF_FRAME_COUNT);
+    int ok_count = 0;
     for (int i = 0; i < GIF_FRAME_COUNT; i++) {
+        gif_frames[i].setPsram(true);
         gif_frames[i].createSprite(GIF_FRAME_W, GIF_FRAME_H);
+        int sw = gif_frames[i].width();
+        if (sw == 0) {
+            ESP_LOGE(TAG, "GIF frame[%d] createSprite OOM", i);
+            continue;
+        }
         char path[32];
         snprintf(path, sizeof(path), "/spiffs/gif_%04d.png", i + 1);
-        gif_frames[i].drawPngFile((const char*)path, 0, 0);
+        FILE* fp = fopen(path, "rb");
+        if (fp) {
+            fseek(fp, 0, SEEK_END);
+            long fsize = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            uint8_t* buf = (uint8_t*)malloc(fsize);
+            if (buf) {
+                fread(buf, 1, fsize, fp);
+                bool ok = gif_frames[i].drawPng(buf, fsize, 0, 0);
+                if (!ok) ESP_LOGE(TAG, "GIF frame[%d] drawPng fail", i);
+                else ok_count++;
+                free(buf);
+            } else {
+                ESP_LOGE(TAG, "GIF frame[%d] malloc(%ld) fail", i, fsize);
+            }
+            fclose(fp);
+        } else {
+            ESP_LOGE(TAG, "GIF frame[%d] fopen fail", i);
+        }
     }
     gif_loaded = true;
-    ESP_LOGI(TAG, "GIF frames loaded");
+    ESP_LOGI(TAG, "GIF: %d/%d frames OK", ok_count, GIF_FRAME_COUNT);
 }
 
-[[maybe_unused]] static void free_gif_frames() {
+static void free_gif_frames() {
     for (int i = 0; i < GIF_FRAME_COUNT; i++) {
         gif_frames[i].deleteSprite();
     }
@@ -553,7 +627,8 @@ static void load_gif_frames() {
 }
 
 static void draw_gif_frame() {
-    tft.fillScreen(COLOR_BLACK);
+    tft.startWrite();
+    tft.fillRect(0, 0, 320, 44, COLOR_BLACK);
 
     int x = (320 - GIF_FRAME_W) / 2;
     int y = 45;
@@ -578,17 +653,31 @@ static void draw_gif_frame() {
     tft.setTextColor(COLOR_GRAY);
     tft.drawString("[LEFT]Slower [RIGHT]Faster [DOWN]Exit", 160, 230);
 
+    tft.fillRect(0, 220, 320, 20, COLOR_BLACK);
     if (gif_exit_popup) draw_exit_popup();
+    tft.endWrite();
+    sync_button_state();
 }
 
 static void handle_gif(int btn) {
     if (gif_need_init) {
+        tft.fillScreen(COLOR_BLACK);
+        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
+        tft.setTextDatum(textdatum_t::middle_center);
+        tft.drawString("Loading...", 160, 120);
+
         gif_exit_popup = false;
         gif_frame_idx = 0;
         gif_speed = 10;
         gif_last_frame_time = esp_timer_get_time() / 1000;
         if (!gif_loaded) load_gif_frames();
         gif_need_init = false;
+
+        if (!audio_running) {
+            audio_running = true;
+            i2s_channel_enable(tx_chan);
+            xTaskCreate(audio_playback_task, "audio", 4096, NULL, 1, &audio_task_handle);
+        }
         draw_gif_frame();
         return;
     }
@@ -596,6 +685,9 @@ static void handle_gif(int btn) {
     if (gif_exit_popup) {
         if (btn == BTN_D) {
             gif_exit_popup = false;
+            audio_running = false;
+            i2s_channel_disable(tx_chan);
+            free_gif_frames();
             current_state = STATE_MENU;
             gif_need_init = true;
             return;
@@ -618,7 +710,6 @@ static void handle_gif(int btn) {
         case BTN_D:
             gif_exit_popup = true;
             draw_gif_frame();
-            wait_button_release(BTN_DOWN);
             return;
     }
 
@@ -631,15 +722,48 @@ static void handle_gif(int btn) {
     }
 }
 
+// ==================== 音频播放任务 ====================
+
+static void audio_playback_task(void* arg) {
+    const char* path = "/spiffs/music.wav";
+    while (audio_running) {
+        FILE* f = fopen(path, "rb");
+        if (!f) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+        fseek(f, 44, SEEK_SET);
+        int16_t buf[512];
+        size_t rd;
+        while (audio_running && (rd = fread(buf, 1, sizeof(buf), f)) > 0) {
+            size_t wr;
+            i2s_channel_write(tx_chan, buf, rd, &wr, portMAX_DELAY);
+        }
+        fclose(f);
+    }
+    audio_task_handle = nullptr;
+    vTaskDelete(NULL);
+}
+
 // ==================== 主入口 ====================
 
 extern "C" void app_main() {
-    ESP_LOGI(TAG, "===== BUTT-demo Starting =====");
+    ESP_LOGI(TAG, "===== box-demo Starting =====");
 
     tft.init();
     tft.setRotation(1);
     tft.setBrightness(255);
     ESP_LOGI(TAG, "TFT: %ldx%ld", tft.width(), tft.height());
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    i2s_new_channel(&chan_cfg, &tx_chan, NULL);
+    i2s_std_config_t std_cfg = {
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(22050),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = { .mclk = I2S_GPIO_UNUSED, .bclk = GPIO_NUM_5, .ws = GPIO_NUM_4,
+                      .dout = GPIO_NUM_6, .din = I2S_GPIO_UNUSED,
+                      .invert_flags = { .mclk_inv = 0, .bclk_inv = 0, .ws_inv = 0 } },
+    };
+    i2s_channel_init_std_mode(tx_chan, &std_cfg);
+    i2s_channel_enable(tx_chan);
+    ESP_LOGI(TAG, "I2S audio: 22050Hz 16bit mono");
 
     init_buttons();
     init_spiffs();
