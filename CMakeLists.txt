@@ -7,4 +7,4 @@ cmake_minimum_required(VERSION 3.16)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(BUTT-demo)
 
-spiffs_create_partition_image(storage ../image FLASH_IN_PROJECT)
+spiffs_create_partition_image(storage image FLASH_IN_PROJECT)
