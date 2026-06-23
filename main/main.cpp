@@ -337,17 +337,26 @@ static void draw_menu() {
 // ---------- 处理菜单按键 ----------
 static void handle_menu(int btn) {
     if (menu_popup) {
-        if (btn == BTN_R) {
-            menu_popup = false;
-            current_state = (AppState)(STATE_IMG + menu_selection);
-            ESP_LOGI(TAG, "Enter state %d", current_state);
-            return;
+        static int64_t menu_popup_ts = 0;
+        int64_t now = esp_timer_get_time() / 1000;
+        int held = BTN_NONE;
+        if (gpio_get_level(BTN_RIGHT) == 0) held = BTN_R;
+        else if (gpio_get_level(BTN_LEFT) == 0) held = BTN_L;
+        if (held != BTN_NONE && now - menu_popup_ts > 400) {
+            menu_popup_ts = now;
+            if (held == BTN_R) {
+                menu_popup = false;
+                current_state = (AppState)(STATE_IMG + menu_selection);
+                ESP_LOGI(TAG, "Enter state %d", current_state);
+                return;
+            }
+            if (held == BTN_L) {
+                menu_popup = false;
+                draw_menu();
+                return;
+            }
         }
-        if (btn == BTN_L) {
-            menu_popup = false;
-            draw_menu();
-            return;
-        }
+        if (held == BTN_NONE) menu_popup_ts = 0;
         return;
     }
 
@@ -479,7 +488,7 @@ static void handle_img(int btn) {
                 audio_running = false;
                 i2s_channel_disable(tx_chan);
                 current_state = STATE_MENU;
-                img_need_init = true;
+                draw_menu();
                 return;
             }
             if (held == BTN_U) {
@@ -598,7 +607,7 @@ static void handle_marquee(int btn) {
                 i2s_channel_disable(tx_chan);
                 if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
                 current_state = STATE_MENU;
-                marquee_need_init = true;
+                draw_menu();
                 return;
             }
             if (held == BTN_U) {
@@ -749,7 +758,7 @@ static void handle_gif(int btn) {
                 i2s_channel_disable(tx_chan);
                 free_gif_frames();
                 current_state = STATE_MENU;
-                gif_need_init = true;
+                draw_menu();
                 return;
             }
             if (held == BTN_U) {
