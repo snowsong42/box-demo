@@ -45,6 +45,7 @@ static AppState current_state = STATE_MENU;
 
 // ==================== 全局实例 ====================
 static LGFX tft;
+static LGFX_Sprite backbuffer(&tft);  // 全帧后缓冲，所有绘制先进此再一次性推屏
 static const char* TAG = "box-demo";
 
 // ==================== 按键状态 (边缘检测) ====================
@@ -66,7 +67,7 @@ static int scroll_offset = 0;
 #define GIF_FRAME_H     200
 static LGFX_Sprite gif_frames[GIF_FRAME_COUNT];
 static bool gif_loaded = false;
-static int gif_speed = 10;
+static int gif_speed = 18;
 static int gif_frame_idx = 0;
 static int64_t gif_last_frame_time = 0;
 
@@ -122,6 +123,12 @@ static int read_buttons() {
     if (gpio_get_level(BTN_RIGHT) == 0) curr = BTN_R;
 
     int event = (curr != BTN_NONE && curr != prev_btn) ? curr : BTN_NONE;
+
+    if (curr != BTN_NONE || event != BTN_NONE) {
+        ESP_LOGI(TAG, "BTN raw=%d prev=%d event=%d (U=1 D=2 L=3 R=4)",
+                 curr, prev_btn, event);
+    }
+
     prev_btn = curr;
     return event;
 }
@@ -133,6 +140,10 @@ static void sync_button_state() {
     else if (gpio_get_level(BTN_DOWN) == 0) prev_btn = BTN_D;
     else if (gpio_get_level(BTN_LEFT) == 0) prev_btn = BTN_L;
     else if (gpio_get_level(BTN_RIGHT) == 0) prev_btn = BTN_R;
+
+    if (prev_btn != BTN_NONE) {
+        ESP_LOGW(TAG, "BTN sync: holding btn=%d (will be eaten, release & press again)", prev_btn);
+    }
 }
 
 // ==================== SPIFFS 初始化 ====================
@@ -212,22 +223,22 @@ static void draw_exit_popup() {
     const int PX = (320 - PW) / 2;
     const int PY = (240 - PH) / 2;
 
-    tft.fillRect(PX, PY, PW, PH, 0x2104);
-    tft.drawRect(PX, PY, PW, PH, COLOR_WHITE);
-    tft.drawRect(PX+2, PY+2, PW-4, PH-4, COLOR_WHITE);
+    backbuffer.fillRect(PX, PY, PW, PH, 0x2104);
+    backbuffer.drawRect(PX, PY, PW, PH, COLOR_WHITE);
+    backbuffer.drawRect(PX+2, PY+2, PW-4, PH-4, COLOR_WHITE);
 
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(2);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("Exit to Menu?", 160, PY + 28);
+    backbuffer.setTextColor(COLOR_WHITE);
+    backbuffer.setTextSize(2);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString("Exit to Menu?", 160, PY + 28);
 
-    tft.fillRect(PX + 15, PY + 48, PW - 30, 2, COLOR_CYAN);
+    backbuffer.fillRect(PX + 15, PY + 48, PW - 30, 2, COLOR_CYAN);
 
-    tft.setTextSize(1.5f);
-    tft.setTextColor(COLOR_CYAN);
-    tft.drawString("Yes: [DOWN]", 160, PY + 74);
-    tft.setTextColor(COLOR_GRAY);
-    tft.drawString("No:  [UP]",   160, PY + 94);
+    backbuffer.setTextSize(1.5f);
+    backbuffer.setTextColor(COLOR_CYAN);
+    backbuffer.drawString("Yes: [DOWN]", 160, PY + 74);
+    backbuffer.setTextColor(COLOR_GRAY);
+    backbuffer.drawString("No:  [UP]",   160, PY + 94);
 }
 
 // ==================== 主菜单 ====================
@@ -249,73 +260,76 @@ static void draw_confirm_popup() {
     const int PX = (320 - PW) / 2;
     const int PY = (240 - PH) / 2;
 
-    tft.fillRect(PX, PY, PW, PH, 0x0861);
-    tft.drawRect(PX, PY, PW, PH, COLOR_WHITE);
-    tft.drawRect(PX+2, PY+2, PW-4, PH-4, COLOR_WHITE);
+    backbuffer.fillRect(PX, PY, PW, PH, 0x0861);
+    backbuffer.drawRect(PX, PY, PW, PH, COLOR_WHITE);
+    backbuffer.drawRect(PX+2, PY+2, PW-4, PH-4, COLOR_WHITE);
 
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(2);
-    tft.setTextDatum(textdatum_t::middle_center);
+    backbuffer.setTextColor(COLOR_WHITE);
+    backbuffer.setTextSize(2);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
     char buf[64];
     snprintf(buf, sizeof(buf), "Selected: %s", menu_items[menu_selection]);
-    tft.drawString(buf, 160, PY + 24);
+    backbuffer.drawString(buf, 160, PY + 24);
 
-    tft.fillRect(PX + 15, PY + 44, PW - 30, 2, COLOR_CYAN);
-    tft.drawString("Enter?", 160, PY + 68);
+    backbuffer.fillRect(PX + 15, PY + 44, PW - 30, 2, COLOR_CYAN);
+    backbuffer.drawString("Enter?", 160, PY + 68);
 
-    tft.setTextSize(1.5f);
-    tft.setTextColor(COLOR_CYAN);
-    tft.drawString("Yes: ->", 100, PY + 100);
-    tft.setTextColor(COLOR_GRAY);
-    tft.drawString("No: <-", 220, PY + 100);
+    backbuffer.setTextSize(1.5f);
+    backbuffer.setTextColor(COLOR_CYAN);
+    backbuffer.drawString("Yes: ->", 100, PY + 100);
+    backbuffer.setTextColor(COLOR_GRAY);
+    backbuffer.drawString("No: <-", 220, PY + 100);
 }
 
 // ---------- 绘制主菜单 ----------
 static void draw_menu() {
-    tft.startWrite();
-    tft.fillRect(0, 0, 320, 240, COLOR_BLACK);
+    backbuffer.fillScreen(COLOR_BLACK);
 
     // 标题
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(4);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("box-demo", 160, TITLE_Y);
+    backbuffer.setTextColor(COLOR_WHITE);
+    backbuffer.setTextSize(4);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString("box-demo", 160, TITLE_Y);
 
     // 表格外框
-    tft.drawRect(TBL_X, TBL_Y, TBL_W, TBL_H, COLOR_WHITE);
-    tft.drawRect(TBL_X+1, TBL_Y+1, TBL_W-2, TBL_H-2, COLOR_GRAY);
+    backbuffer.drawRect(TBL_X, TBL_Y, TBL_W, TBL_H, COLOR_WHITE);
+    backbuffer.drawRect(TBL_X+1, TBL_Y+1, TBL_W-2, TBL_H-2, COLOR_GRAY);
 
     for (int i = 0; i < MENU_COUNT; i++) {
         int ry = TBL_Y + i * ROW_H;
 
         if (i > 0)
-            tft.fillRect(TBL_X + 1, ry, TBL_W - 2, 1, COLOR_GRAY);
+            backbuffer.fillRect(TBL_X + 1, ry, TBL_W - 2, 1, COLOR_GRAY);
 
         uint16_t row_bg = (i == menu_selection) ? 0x18E3 : 0x0000;
-        tft.fillRect(TBL_X + 2, ry + 1, TBL_W - 4, ROW_H - 2, row_bg);
+        backbuffer.fillRect(TBL_X + 2, ry + 1, TBL_W - 4, ROW_H - 2, row_bg);
 
-        tft.setTextDatum(textdatum_t::middle_center);
+        backbuffer.setTextDatum(textdatum_t::middle_center);
         if (i == menu_selection) {
-            tft.setTextColor(COLOR_CYAN);
-            tft.setTextSize(1);
-            tft.drawString(">", TBL_X + 25, ry + ROW_H/2);
-            tft.setTextSize(2);
-            tft.setTextColor(COLOR_WHITE);
-            tft.drawString(menu_items[i], 160, ry + ROW_H/2);
+            backbuffer.setTextColor(COLOR_CYAN);
+            backbuffer.setTextSize(1);
+            backbuffer.drawString(">", TBL_X + 25, ry + ROW_H/2);
+            backbuffer.setTextSize(2);
+            backbuffer.setTextColor(COLOR_WHITE);
+            backbuffer.drawString(menu_items[i], 160, ry + ROW_H/2);
         } else {
-            tft.setTextColor(COLOR_GRAY);
-            tft.setTextSize(2);
-            tft.drawString(menu_items[i], 160, ry + ROW_H/2);
+            backbuffer.setTextColor(COLOR_GRAY);
+            backbuffer.setTextSize(2);
+            backbuffer.drawString(menu_items[i], 160, ry + ROW_H/2);
         }
     }
 
     // 底部提示
-    tft.setTextColor(0x632C);
-    tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("[UP][DOWN] Select    [RIGHT] Enter", 160, HINT_Y);
+    backbuffer.setTextColor(0x632C);
+    backbuffer.setTextSize(1);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString("[UP][DOWN] Select    [RIGHT] Enter", 160, HINT_Y);
 
     if (menu_popup) draw_confirm_popup();
+
+    // 一次性推屏，无闪烁
+    tft.startWrite();
+    backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
     sync_button_state();
 }
@@ -372,12 +386,12 @@ static void draw_img_browser() {
 
     if (img_w_cache[img_index] == 0) {
         if (!get_png_size(path, &img_w_cache[img_index], &img_h_cache[img_index])) {
-            tft.startWrite();
-            tft.fillScreen(COLOR_BLACK);
-            tft.setTextColor(COLOR_RED); tft.setTextSize(1);
-            tft.setTextDatum(textdatum_t::middle_center);
-            tft.drawString("Load failed!", 160, 120);
-            tft.endWrite(); sync_button_state(); return;
+            backbuffer.fillScreen(COLOR_BLACK);
+            backbuffer.setTextColor(COLOR_RED); backbuffer.setTextSize(1);
+            backbuffer.setTextDatum(textdatum_t::middle_center);
+            backbuffer.drawString("Load failed!", 160, 120);
+            tft.startWrite(); backbuffer.pushSprite(&tft, 0, 0); tft.endWrite();
+            sync_button_state(); return;
         }
     }
 
@@ -386,10 +400,11 @@ static void draw_img_browser() {
 
     FILE* fp = fopen(path, "rb");
     if (!fp) {
-        tft.startWrite(); tft.fillScreen(COLOR_BLACK);
-        tft.setTextColor(COLOR_RED);
-        tft.drawString("File open fail!", 160, 120);
-        tft.endWrite(); sync_button_state(); return;
+        backbuffer.fillScreen(COLOR_BLACK);
+        backbuffer.setTextColor(COLOR_RED);
+        backbuffer.drawString("File open fail!", 160, 120);
+        tft.startWrite(); backbuffer.pushSprite(&tft, 0, 0); tft.endWrite();
+        sync_button_state(); return;
     }
     fseek(fp, 0, SEEK_END);
     long fsize = ftell(fp);
@@ -399,45 +414,41 @@ static void draw_img_browser() {
     fread(png_buf, 1, fsize, fp);
     fclose(fp);
 
-    // 离屏 Sprite 合成 (PSRAM, 消除闪烁)
-    LGFX_Sprite spr(&tft);
-    spr.setPsram(true);
-    spr.createSprite(320, IMG_AREA_H);
-    spr.fillScreen(COLOR_BLACK);
-    int sx = (320 - img_w) / 2;
-    int sy = (IMG_AREA_H - img_h) / 2;
-    spr.drawPng(png_buf, fsize, sx, sy);
-    heap_caps_free(png_buf);
-
-    // 关显示 → 写 GRAM（标题+图片+提示）→ 开显示，瞬间完整呈现
-    tft.startWrite();
-    tft.writeCommand(0x28);
-    tft.fillScreen(COLOR_BLACK);
+    // 所有内容绘入后缓冲（无闪烁、无 0x28/0x29）
+    backbuffer.fillScreen(COLOR_BLACK);
 
     char buf[64];
     snprintf(buf, sizeof(buf), "Browser[%04d/%04d]", idx, img_count);
-    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString(buf, 160, 7);
+    backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(1);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString(buf, 160, 7);
 
-    spr.pushSprite(0, IMG_AREA_Y);
-    spr.deleteSprite();
+    int sx = (320 - img_w) / 2;
+    int sy = IMG_AREA_Y + (IMG_AREA_H - img_h) / 2;
+    backbuffer.drawPng(png_buf, fsize, sx, sy);
+    heap_caps_free(png_buf);
 
-    tft.setTextColor(0x632C);
-    tft.drawString("  [LEFT] Prev  [RIGHT] Next  [DOWN] Back  ", 160, IMG_HINT_Y);
+    backbuffer.setTextColor(0x632C);
+    backbuffer.drawString("  [LEFT] Prev  [RIGHT] Next  [DOWN] Back  ", 160, IMG_HINT_Y);
 
     if (img_exit_popup) draw_exit_popup();
-    tft.writeCommand(0x29);
+
+    // 一次性推屏
+    tft.startWrite();
+    backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
     sync_button_state();
 }
 
 static void handle_img(int btn) {
     if (img_need_init) {
-        tft.fillScreen(COLOR_BLACK);
-        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
-        tft.setTextDatum(textdatum_t::middle_center);
-        tft.drawString("Loading...", 160, 120);
+        backbuffer.fillScreen(COLOR_BLACK);
+        backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(2);
+        backbuffer.setTextDatum(textdatum_t::middle_center);
+        backbuffer.drawString("Loading...", 160, 120);
+        tft.startWrite();
+        backbuffer.pushSprite(&tft, 0, 0);
+        tft.endWrite();
 
         img_count = detect_img_count();
         img_index = 0;
@@ -502,35 +513,40 @@ static uint16_t* marquee_raw = nullptr;
 #define MARQUEE_HINT_Y 229
 
 static void draw_marquee_frame() {
-    tft.startWrite();
-    tft.fillRect(0, 0, 320, MARQUEE_TOP_H, COLOR_BLACK);
+    backbuffer.fillRect(0, 0, 320, MARQUEE_TOP_H, COLOR_BLACK);
 
-    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("Marquee 500x150", 160, 7);
+    backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(1);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString("Marquee 500x150", 160, 7);
 
     if (marquee_raw) {
-        tft.setSwapBytes(true);
-        tft.pushImage(-scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
-        tft.pushImage(MARQUEE_W - scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
-        tft.setSwapBytes(false);
+        backbuffer.setSwapBytes(true);
+        backbuffer.pushImage(-scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
+        backbuffer.pushImage(MARQUEE_W - scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
+        backbuffer.setSwapBytes(false);
     }
 
-    tft.fillRect(0, 218, 320, 22, COLOR_BLACK);
-    tft.setTextColor(0x632C);
-    tft.drawString("[DOWN] Back", 160, MARQUEE_HINT_Y);
+    backbuffer.fillRect(0, 218, 320, 22, COLOR_BLACK);
+    backbuffer.setTextColor(0x632C);
+    backbuffer.drawString("[DOWN] Back", 160, MARQUEE_HINT_Y);
 
     if (marquee_exit_popup) draw_exit_popup();
+
+    tft.startWrite();
+    backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
     sync_button_state();
 }
 
 static void handle_marquee(int btn) {
     if (marquee_need_init) {
-        tft.fillScreen(COLOR_BLACK);
-        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
-        tft.setTextDatum(textdatum_t::middle_center);
-        tft.drawString("Loading...", 160, 120);
+        backbuffer.fillScreen(COLOR_BLACK);
+        backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(2);
+        backbuffer.setTextDatum(textdatum_t::middle_center);
+        backbuffer.drawString("Loading...", 160, 120);
+        tft.startWrite();
+        backbuffer.pushSprite(&tft, 0, 0);
+        tft.endWrite();
 
         marquee_exit_popup = false;
         scroll_offset = 0;
@@ -642,46 +658,52 @@ static void free_gif_frames() {
 #define GIF_HINT_Y 227
 
 static void draw_gif_frame() {
-    tft.startWrite();
-    tft.fillRect(0, 0, 320, GIF_TOP_H, COLOR_BLACK);
+    backbuffer.fillRect(0, 0, 320, GIF_TOP_H, COLOR_BLACK);
 
     // 帧号+Speed+速度条 同一行
     char buf[64];
     snprintf(buf, sizeof(buf), "GIF[%02d/%02d]  Speed:%d", gif_frame_idx + 1, GIF_FRAME_COUNT, gif_speed);
-    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::top_left);
-    tft.drawString(buf, 6, 3);
+    backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(1);
+    backbuffer.setTextDatum(textdatum_t::top_left);
+    backbuffer.drawString(buf, 6, 3);
 
     int filled = (gif_speed * 10) / 20;
     const int bx = 135, by = 5, bw = 8, bh = 4;
     for (int i = 0; i < filled; i++)
-        tft.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GREEN);
+        backbuffer.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GREEN);
     for (int i = filled; i < 10; i++)
-        tft.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GRAY);
+        backbuffer.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GRAY);
 
+    // GIF 帧 → 后缓冲
     int x = (320 - GIF_FRAME_W) / 2;
-    gif_frames[gif_frame_idx].pushSprite(&tft, x, GIF_FRAME_Y);
+    gif_frames[gif_frame_idx].pushSprite(&backbuffer, x, GIF_FRAME_Y);
 
-    tft.fillRect(0, 214, 320, 26, COLOR_BLACK);
-    tft.setTextColor(0x632C);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("  [LEFT] Slower  [RIGHT] Faster  [DOWN] Back  ", 160, GIF_HINT_Y);
+    backbuffer.fillRect(0, 214, 320, 26, COLOR_BLACK);
+    backbuffer.setTextColor(0x632C);
+    backbuffer.setTextDatum(textdatum_t::middle_center);
+    backbuffer.drawString("  [LEFT] Slower  [RIGHT] Faster  [DOWN] Back  ", 160, GIF_HINT_Y);
 
     if (gif_exit_popup) draw_exit_popup();
+
+    tft.startWrite();
+    backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
     sync_button_state();
 }
 
 static void handle_gif(int btn) {
     if (gif_need_init) {
-        tft.fillScreen(COLOR_BLACK);
-        tft.setTextColor(COLOR_WHITE); tft.setTextSize(2);
-        tft.setTextDatum(textdatum_t::middle_center);
-        tft.drawString("Loading...", 160, 120);
+        backbuffer.fillScreen(COLOR_BLACK);
+        backbuffer.setTextColor(COLOR_WHITE); backbuffer.setTextSize(2);
+        backbuffer.setTextDatum(textdatum_t::middle_center);
+        backbuffer.drawString("Loading...", 160, 120);
+        tft.startWrite();
+        backbuffer.pushSprite(&tft, 0, 0);
+        tft.endWrite();
 
         gif_exit_popup = false;
         gif_frame_idx = 0;
-        gif_speed = 10;
+        gif_speed = 18;
         gif_last_frame_time = esp_timer_get_time() / 1000;
         if (!gif_loaded) load_gif_frames();
         gif_need_init = false;
@@ -765,6 +787,10 @@ extern "C" void app_main() {
     tft.setBrightness(255);
     ESP_LOGI(TAG, "TFT: %ldx%ld", tft.width(), tft.height());
 
+    // 全帧后缓冲 (320×240×2 = 150KB PSRAM)
+    backbuffer.setPsram(true);
+    backbuffer.createSprite(320, 240);
+
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     i2s_new_channel(&chan_cfg, &tx_chan, NULL);
     i2s_std_config_t std_cfg = {
@@ -775,7 +801,7 @@ extern "C" void app_main() {
                       .invert_flags = { .mclk_inv = 0, .bclk_inv = 0, .ws_inv = 0 } },
     };
     i2s_channel_init_std_mode(tx_chan, &std_cfg);
-    i2s_channel_enable(tx_chan);
+    // 延迟到进入子功能时再 enable，避免重复调用报错
     ESP_LOGI(TAG, "I2S audio: 22050Hz 16bit mono");
 
     init_buttons();

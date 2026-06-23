@@ -97,6 +97,7 @@ box-demo/
 │   ├── app-architecture.md # 应用架构 (状态机 + 生命周期)
 │   ├── build-config.md     # 构建与配置指南
 │   ├── lovyangfx-sprite-image-guide.md # 开发踩坑记录
+│   ├── anti-flicker-backbuffer-guide.md # 抗闪烁: 全帧缓冲方案演进
 │   └── cloud-asr-plan.md   # 未来规划: WiFi 云端语音识别
 └── CMakeLists.txt          # 顶层项目文件 (SPIFFS 镜像生成)
 ```
@@ -217,6 +218,7 @@ idf.py build flash -p COM7
 |------|------|
 | [docs/diji-nes-reference.md](docs/diji-nes-reference.md) | DIJI-NES 原型完整分析、硬件对比、可复用方案 |
 | [docs/lovyangfx-sprite-image-guide.md](docs/lovyangfx-sprite-image-guide.md) | 开发踩坑记录：SPIFFS 兼容、PSRAM、按键防抖 |
+| [docs/anti-flicker-backbuffer-guide.md](docs/anti-flicker-backbuffer-guide.md) | 抗闪烁演进：从 fillRect→Sprite→0x28→全帧缓冲 |
 | [docs/cloud-asr-plan.md](docs/cloud-asr-plan.md) | 🚧 未来规划：WiFi 云端语音识别方案 |
 
 ---
