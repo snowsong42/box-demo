@@ -359,72 +359,75 @@ static bool img_need_init = true;
 static int img_w_cache[100];
 static int img_h_cache[100];
 
+// 布局: 标题 y=0~13 (14px) + 图片 y=14~213 (200px) + 提示 y=214~239 (26px)
+#define IMG_AREA_Y 14
+#define IMG_AREA_H 200
+#define IMG_HINT_Y 227
+
 static void draw_img_browser() {
-    tft.startWrite();
-    tft.fillRect(0, 0, 320, 20, COLOR_BLACK);
-
     int idx = img_index + 1;
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Browser [%04d/%04d]", idx, img_count);
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString(buf, 160, 12);
-
     char path[32];
     snprintf(path, sizeof(path), "/spiffs/%04d.png", idx);
     ESP_LOGI(TAG, "IMG loading: %s", path);
 
     if (img_w_cache[img_index] == 0) {
         if (!get_png_size(path, &img_w_cache[img_index], &img_h_cache[img_index])) {
-            ESP_LOGE(TAG, "IMG get_png_size failed for %s", path);
-            tft.setTextColor(COLOR_RED);
-            tft.setTextSize(1);
+            tft.startWrite();
+            tft.fillScreen(COLOR_BLACK);
+            tft.setTextColor(COLOR_RED); tft.setTextSize(1);
+            tft.setTextDatum(textdatum_t::middle_center);
             tft.drawString("Load failed!", 160, 120);
-            goto draw_hint;
+            tft.endWrite(); sync_button_state(); return;
         }
     }
 
-    {
-        int img_w = img_w_cache[img_index];
-        int img_h = img_h_cache[img_index];
-        int x = (320 - img_w) / 2;
-        int y = 20 + (200 - img_h) / 2;
-        ESP_LOGI(TAG, "IMG pos: %s (%dx%d) -> (%d,%d)", path, img_w, img_h, x, y);
+    int img_w = img_w_cache[img_index];
+    int img_h = img_h_cache[img_index];
 
-        FILE* fp = fopen(path, "rb");
-        if (!fp) {
-            ESP_LOGE(TAG, "IMG fopen failed: %s", path);
-            tft.setTextColor(COLOR_RED);
-            tft.drawString("File open fail!", 160, 120);
-        } else {
-            fseek(fp, 0, SEEK_END);
-            long fsize = ftell(fp);
-            fseek(fp, 0, SEEK_SET);
-            uint8_t* png_buf = (uint8_t*)heap_caps_malloc(fsize, MALLOC_CAP_SPIRAM);
-            if (png_buf) {
-                fread(png_buf, 1, fsize, fp);
-                if (!tft.drawPng(png_buf, fsize, x, y)) {
-                    ESP_LOGE(TAG, "IMG drawPng failed: %s", path);
-                    tft.setTextColor(COLOR_RED);
-                    tft.drawString("PNG decode fail!", 160, 120);
-                }
-                heap_caps_free(png_buf);
-            } else {
-                ESP_LOGE(TAG, "IMG PSRAM alloc(%ld) failed", fsize);
-            }
-            fclose(fp);
-        }
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        tft.startWrite(); tft.fillScreen(COLOR_BLACK);
+        tft.setTextColor(COLOR_RED);
+        tft.drawString("File open fail!", 160, 120);
+        tft.endWrite(); sync_button_state(); return;
     }
+    fseek(fp, 0, SEEK_END);
+    long fsize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    uint8_t* png_buf = (uint8_t*)heap_caps_malloc(fsize, MALLOC_CAP_SPIRAM);
+    if (!png_buf) { ESP_LOGE(TAG, "IMG PSRAM alloc(%ld) failed", fsize); fclose(fp); return; }
+    fread(png_buf, 1, fsize, fp);
+    fclose(fp);
 
-draw_hint:
-    tft.setTextColor(COLOR_GRAY);
-    tft.setTextSize(1);
+    // 离屏 Sprite 合成 (PSRAM, 消除闪烁)
+    LGFX_Sprite spr(&tft);
+    spr.setPsram(true);
+    spr.createSprite(320, IMG_AREA_H);
+    spr.fillScreen(COLOR_BLACK);
+    int sx = (320 - img_w) / 2;
+    int sy = (IMG_AREA_H - img_h) / 2;
+    spr.drawPng(png_buf, fsize, sx, sy);
+    heap_caps_free(png_buf);
+
+    // 关显示 → 写 GRAM（标题+图片+提示）→ 开显示，瞬间完整呈现
+    tft.startWrite();
+    tft.writeCommand(0x28);
+    tft.fillScreen(COLOR_BLACK);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Browser[%04d/%04d]", idx, img_count);
+    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
     tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("[LEFT]Prev [RIGHT]Next [DOWN]Exit", 160, 230);
+    tft.drawString(buf, 160, 7);
 
-    tft.fillRect(0, 220, 320, 20, COLOR_BLACK);
+    spr.pushSprite(0, IMG_AREA_Y);
+    spr.deleteSprite();
+
+    tft.setTextColor(0x632C);
+    tft.drawString("  [LEFT] Prev  [RIGHT] Next  [DOWN] Back  ", 160, IMG_HINT_Y);
+
     if (img_exit_popup) draw_exit_popup();
+    tft.writeCommand(0x29);
     tft.endWrite();
     sync_button_state();
 }
@@ -493,23 +496,29 @@ static void handle_img(int btn) {
 static bool marquee_need_init = true;
 static uint16_t* marquee_raw = nullptr;
 
+// 布局: 标题 y=0~13 (14px) + 走马灯 y=41~190 (150px居中) + 提示 y=218~239
+#define MARQUEE_TOP_H 14
+#define MARQUEE_IMG_Y 41   // 14 + (240-14-22-150)/2 = 41
+#define MARQUEE_HINT_Y 229
+
 static void draw_marquee_frame() {
     tft.startWrite();
+    tft.fillRect(0, 0, 320, MARQUEE_TOP_H, COLOR_BLACK);
+
+    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
+    tft.setTextDatum(textdatum_t::middle_center);
+    tft.drawString("Marquee 500x150", 160, 7);
 
     if (marquee_raw) {
         tft.setSwapBytes(true);
-        tft.pushImage(-scroll_offset, 45, MARQUEE_W, MARQUEE_H, marquee_raw);
-        tft.pushImage(MARQUEE_W - scroll_offset, 45, MARQUEE_W, MARQUEE_H, marquee_raw);
+        tft.pushImage(-scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
+        tft.pushImage(MARQUEE_W - scroll_offset, MARQUEE_IMG_Y, MARQUEE_W, MARQUEE_H, marquee_raw);
         tft.setSwapBytes(false);
     }
 
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString("Marquee 500x150 scrolling...", 160, 12);
-
-    tft.setTextColor(COLOR_GRAY);
-    tft.drawString("[DOWN]Exit", 160, 230);
+    tft.fillRect(0, 218, 320, 22, COLOR_BLACK);
+    tft.setTextColor(0x632C);
+    tft.drawString("[DOWN] Back", 160, MARQUEE_HINT_Y);
 
     if (marquee_exit_popup) draw_exit_popup();
     tft.endWrite();
@@ -593,6 +602,7 @@ static void load_gif_frames() {
             ESP_LOGE(TAG, "GIF frame[%d] createSprite OOM", i);
             continue;
         }
+        gif_frames[i].fillScreen(COLOR_BLACK);
         char path[32];
         snprintf(path, sizeof(path), "/spiffs/gif_%04d.png", i + 1);
         FILE* fp = fopen(path, "rb");
@@ -626,34 +636,37 @@ static void free_gif_frames() {
     gif_loaded = false;
 }
 
+// 布局: 标题 y=0~11 (12px) + 帧 y=14~213 (200px) + 提示 y=214~239
+#define GIF_TOP_H 12
+#define GIF_FRAME_Y 14
+#define GIF_HINT_Y 227
+
 static void draw_gif_frame() {
     tft.startWrite();
-    tft.fillRect(0, 0, 320, 44, COLOR_BLACK);
+    tft.fillRect(0, 0, 320, GIF_TOP_H, COLOR_BLACK);
 
-    int x = (320 - GIF_FRAME_W) / 2;
-    int y = 45;
-    gif_frames[gif_frame_idx].pushSprite(&tft, x, y, COLOR_BLACK);
-
+    // 帧号+Speed+速度条 同一行
     char buf[64];
-    snprintf(buf, sizeof(buf), "GIF Frame[%02d/%02d]", gif_frame_idx + 1, GIF_FRAME_COUNT);
-    tft.setTextColor(COLOR_WHITE);
-    tft.setTextSize(1);
-    tft.setTextDatum(textdatum_t::middle_center);
-    tft.drawString(buf, 160, 12);
+    snprintf(buf, sizeof(buf), "GIF[%02d/%02d]  Speed:%d", gif_frame_idx + 1, GIF_FRAME_COUNT, gif_speed);
+    tft.setTextColor(COLOR_WHITE); tft.setTextSize(1);
+    tft.setTextDatum(textdatum_t::top_left);
+    tft.drawString(buf, 6, 3);
 
     int filled = (gif_speed * 10) / 20;
+    const int bx = 135, by = 5, bw = 8, bh = 4;
     for (int i = 0; i < filled; i++)
-        tft.fillRect(120 + i * 6, 25, 5, 6, COLOR_GREEN);
+        tft.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GREEN);
     for (int i = filled; i < 10; i++)
-        tft.fillRect(120 + i * 6, 25, 5, 6, COLOR_GRAY);
+        tft.fillRect(bx + i * (bw + 1), by, bw, bh, COLOR_GRAY);
 
-    snprintf(buf, sizeof(buf), "Speed: (%d/20)", gif_speed);
-    tft.drawString(buf, 160, 38);
+    int x = (320 - GIF_FRAME_W) / 2;
+    gif_frames[gif_frame_idx].pushSprite(&tft, x, GIF_FRAME_Y);
 
-    tft.setTextColor(COLOR_GRAY);
-    tft.drawString("[LEFT]Slower [RIGHT]Faster [DOWN]Exit", 160, 230);
+    tft.fillRect(0, 214, 320, 26, COLOR_BLACK);
+    tft.setTextColor(0x632C);
+    tft.setTextDatum(textdatum_t::middle_center);
+    tft.drawString("  [LEFT] Slower  [RIGHT] Faster  [DOWN] Back  ", 160, GIF_HINT_Y);
 
-    tft.fillRect(0, 220, 320, 20, COLOR_BLACK);
     if (gif_exit_popup) draw_exit_popup();
     tft.endWrite();
     sync_button_state();
