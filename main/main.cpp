@@ -131,17 +131,6 @@ static int read_buttons() {
     return event;
 }
 
-/// 长绘图后重新校准边缘检测（防止盲区丢失边沿）
-static void sync_button_state() {
-    prev_btn = BTN_NONE;
-    if (gpio_get_level(BTN_UP) == 0)       prev_btn = BTN_U;
-    else if (gpio_get_level(BTN_DOWN) == 0) prev_btn = BTN_D;
-    else if (gpio_get_level(BTN_LEFT) == 0) prev_btn = BTN_L;
-    else if (gpio_get_level(BTN_RIGHT) == 0) prev_btn = BTN_R;
-
-    // (sync silent — only calibrates edge detection after long draws)
-}
-
 // DIJI-NES: 全局动作冷却计时器（200ms 门控，防双击）
 static int64_t last_action_time = 0;
 
@@ -331,7 +320,6 @@ static void draw_menu() {
     tft.startWrite();
     backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
-    sync_button_state();
 }
 
 // ---------- 处理菜单按键 ----------
@@ -403,7 +391,7 @@ static void draw_img_browser() {
             backbuffer.setTextDatum(textdatum_t::middle_center);
             backbuffer.drawString("Load failed!", 160, 120);
             tft.startWrite(); backbuffer.pushSprite(&tft, 0, 0); tft.endWrite();
-            sync_button_state(); return;
+            return;
         }
     }
 
@@ -416,7 +404,7 @@ static void draw_img_browser() {
         backbuffer.setTextColor(COLOR_RED);
         backbuffer.drawString("File open fail!", 160, 120);
         tft.startWrite(); backbuffer.pushSprite(&tft, 0, 0); tft.endWrite();
-        sync_button_state(); return;
+        return;
     }
     fseek(fp, 0, SEEK_END);
     long fsize = ftell(fp);
@@ -449,7 +437,6 @@ static void draw_img_browser() {
     tft.startWrite();
     backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
-    sync_button_state();
 }
 
 static void handle_img(int btn) {
@@ -561,7 +548,6 @@ static void draw_marquee_frame() {
     tft.startWrite();
     backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
-    sync_button_state();
 }
 
 static void handle_marquee(int btn) {
@@ -728,7 +714,6 @@ static void draw_gif_frame() {
     tft.startWrite();
     backbuffer.pushSprite(&tft, 0, 0);
     tft.endWrite();
-    sync_button_state();
 }
 
 static void handle_gif(int btn) {
