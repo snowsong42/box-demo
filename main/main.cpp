@@ -123,12 +123,6 @@ static int read_buttons() {
     if (gpio_get_level(BTN_RIGHT) == 0) curr = BTN_R;
 
     int event = (curr != BTN_NONE && curr != prev_btn) ? curr : BTN_NONE;
-
-    if (curr != BTN_NONE || event != BTN_NONE) {
-        ESP_LOGI(TAG, "BTN raw=%d prev=%d event=%d (U=1 D=2 L=3 R=4)",
-                 curr, prev_btn, event);
-    }
-
     prev_btn = curr;
     return event;
 }
@@ -141,9 +135,7 @@ static void sync_button_state() {
     else if (gpio_get_level(BTN_LEFT) == 0) prev_btn = BTN_L;
     else if (gpio_get_level(BTN_RIGHT) == 0) prev_btn = BTN_R;
 
-    if (prev_btn != BTN_NONE) {
-        ESP_LOGW(TAG, "BTN sync: holding btn=%d (will be eaten, release & press again)", prev_btn);
-    }
+    // (sync silent — only calibrates edge detection after long draws)
 }
 
 // ==================== SPIFFS 初始化 ====================
@@ -341,15 +333,15 @@ static void handle_menu(int btn) {
         int64_t now = esp_timer_get_time() / 1000;
         if (menu_popup_ts == 0) menu_popup_ts = now;
 
-        // 边沿优先：轻触即响应
         if (btn == BTN_R) {
+            ESP_LOGI(TAG, "ENTER: %s", menu_items[menu_selection]);
             menu_popup = false;
             current_state = (AppState)(STATE_IMG + menu_selection);
-            ESP_LOGI(TAG, "Enter state %d", current_state);
             draw_menu();
             return;
         }
         if (btn == BTN_L) {
+            ESP_LOGI(TAG, "CANCEL");
             menu_popup = false;
             draw_menu();
             return;
@@ -364,10 +356,11 @@ static void handle_menu(int btn) {
         else if (now - menu_popup_ts > 400) {
             menu_popup_ts = now;
             if (held == BTN_R) {
+                ESP_LOGI(TAG, "ENTER: %s", menu_items[menu_selection]);
                 menu_popup = false;
                 current_state = (AppState)(STATE_IMG + menu_selection);
-                ESP_LOGI(TAG, "Enter state %d", current_state);
             } else {
+                ESP_LOGI(TAG, "CANCEL");
                 menu_popup = false;
                 draw_menu();
             }
@@ -385,6 +378,7 @@ static void handle_menu(int btn) {
             draw_menu();
             break;
         case BTN_R:
+            ESP_LOGI(TAG, "POPUP: enter %s?", menu_items[menu_selection]);
             menu_popup = true;
             draw_menu();
             break;
@@ -475,6 +469,7 @@ static void handle_img(int btn) {
         tft.endWrite();
 
         img_count = detect_img_count();
+        ESP_LOGI(TAG, "INIT: IMG browser (%d images)", img_count);
         img_index = 0;
         img_need_init = false;
         img_exit_popup = false;
@@ -496,6 +491,7 @@ static void handle_img(int btn) {
         if (img_popup_ts == 0) img_popup_ts = now;
 
         if (btn == BTN_D) {
+            ESP_LOGI(TAG, "EXIT: IMG -> MENU");
             img_exit_popup = false;
             img_need_init = true;
             audio_running = false;
@@ -506,6 +502,7 @@ static void handle_img(int btn) {
             return;
         }
         if (btn == BTN_U) {
+            ESP_LOGI(TAG, "CANCEL");
             img_exit_popup = false;
             draw_img_browser();
             return;
@@ -519,6 +516,7 @@ static void handle_img(int btn) {
         else if (now - img_popup_ts > 400) {
             img_popup_ts = now;
             if (held == BTN_D) {
+                ESP_LOGI(TAG, "EXIT: IMG -> MENU");
                 img_exit_popup = false;
                 img_need_init = true;
                 audio_running = false;
@@ -527,6 +525,7 @@ static void handle_img(int btn) {
                 current_state = STATE_MENU;
                 draw_menu();
             } else {
+                ESP_LOGI(TAG, "CANCEL");
                 img_exit_popup = false;
                 draw_img_browser();
             }
@@ -544,6 +543,7 @@ static void handle_img(int btn) {
             draw_img_browser();
             break;
         case BTN_D:
+            ESP_LOGI(TAG, "POPUP: exit IMG?");
             img_exit_popup = true;
             draw_img_browser();
             break;
@@ -599,6 +599,7 @@ static void handle_marquee(int btn) {
         backbuffer.pushSprite(&tft, 0, 0);
         tft.endWrite();
 
+        ESP_LOGI(TAG, "INIT: Marquee 500x150");
         marquee_exit_popup = false;
         scroll_offset = 0;
         if (!marquee_raw) {
@@ -632,6 +633,7 @@ static void handle_marquee(int btn) {
         if (marquee_popup_ts == 0) marquee_popup_ts = now;
 
         if (btn == BTN_D) {
+            ESP_LOGI(TAG, "EXIT: Marquee -> MENU");
             marquee_exit_popup = false;
             marquee_need_init = true;
             audio_running = false;
@@ -643,6 +645,7 @@ static void handle_marquee(int btn) {
             return;
         }
         if (btn == BTN_U) {
+            ESP_LOGI(TAG, "CANCEL");
             marquee_exit_popup = false;
             draw_marquee_frame();
             return;
@@ -656,6 +659,7 @@ static void handle_marquee(int btn) {
         else if (now - marquee_popup_ts > 400) {
             marquee_popup_ts = now;
             if (held == BTN_D) {
+                ESP_LOGI(TAG, "EXIT: Marquee -> MENU");
                 marquee_exit_popup = false;
                 marquee_need_init = true;
                 audio_running = false;
@@ -665,6 +669,7 @@ static void handle_marquee(int btn) {
                 current_state = STATE_MENU;
                 draw_menu();
             } else {
+                ESP_LOGI(TAG, "CANCEL");
                 marquee_exit_popup = false;
                 draw_marquee_frame();
             }
@@ -673,6 +678,7 @@ static void handle_marquee(int btn) {
     }
 
     if (btn == BTN_D) {
+        ESP_LOGI(TAG, "POPUP: exit Marquee?");
         marquee_exit_popup = true;
         draw_marquee_frame();
         return;
@@ -780,6 +786,7 @@ static void handle_gif(int btn) {
         backbuffer.pushSprite(&tft, 0, 0);
         tft.endWrite();
 
+        ESP_LOGI(TAG, "INIT: GIF player (%d frames)", GIF_FRAME_COUNT);
         gif_exit_popup = false;
         gif_frame_idx = 0;
         gif_speed = 18;
@@ -802,6 +809,7 @@ static void handle_gif(int btn) {
         if (gif_popup_ts == 0) gif_popup_ts = now;
 
         if (btn == BTN_D) {
+            ESP_LOGI(TAG, "EXIT: GIF -> MENU");
             gif_exit_popup = false;
             gif_need_init = true;
             audio_running = false;
@@ -813,6 +821,7 @@ static void handle_gif(int btn) {
             return;
         }
         if (btn == BTN_U) {
+            ESP_LOGI(TAG, "CANCEL");
             gif_exit_popup = false;
             draw_gif_frame();
             return;
@@ -826,6 +835,7 @@ static void handle_gif(int btn) {
         else if (now - gif_popup_ts > 400) {
             gif_popup_ts = now;
             if (held == BTN_D) {
+                ESP_LOGI(TAG, "EXIT: GIF -> MENU");
                 gif_exit_popup = false;
                 gif_need_init = true;
                 audio_running = false;
@@ -835,6 +845,7 @@ static void handle_gif(int btn) {
                 current_state = STATE_MENU;
                 draw_menu();
             } else {
+                ESP_LOGI(TAG, "CANCEL");
                 gif_exit_popup = false;
                 draw_gif_frame();
             }
@@ -850,6 +861,7 @@ static void handle_gif(int btn) {
             if (gif_speed < 20) { gif_speed++; draw_gif_frame(); }
             break;
         case BTN_D:
+            ESP_LOGI(TAG, "POPUP: exit GIF?");
             gif_exit_popup = true;
             draw_gif_frame();
             return;
