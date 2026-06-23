@@ -346,6 +346,7 @@ static void handle_menu(int btn) {
             menu_popup = false;
             current_state = (AppState)(STATE_IMG + menu_selection);
             ESP_LOGI(TAG, "Enter state %d", current_state);
+            draw_menu();
             return;
         }
         if (btn == BTN_L) {
@@ -496,7 +497,9 @@ static void handle_img(int btn) {
 
         if (btn == BTN_D) {
             img_exit_popup = false;
+            img_need_init = true;
             audio_running = false;
+            if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
             i2s_channel_disable(tx_chan);
             current_state = STATE_MENU;
             draw_menu();
@@ -512,12 +515,14 @@ static void handle_img(int btn) {
         if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
         else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
 
-        if (held == BTN_NONE) img_popup_ts = 0;
+        if (held == BTN_NONE) { img_popup_ts = 0; draw_img_browser(); }
         else if (now - img_popup_ts > 400) {
             img_popup_ts = now;
             if (held == BTN_D) {
                 img_exit_popup = false;
+                img_need_init = true;
                 audio_running = false;
+                if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
                 i2s_channel_disable(tx_chan);
                 current_state = STATE_MENU;
                 draw_menu();
@@ -628,7 +633,9 @@ static void handle_marquee(int btn) {
 
         if (btn == BTN_D) {
             marquee_exit_popup = false;
+            marquee_need_init = true;
             audio_running = false;
+            if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
             i2s_channel_disable(tx_chan);
             if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
             current_state = STATE_MENU;
@@ -645,12 +652,14 @@ static void handle_marquee(int btn) {
         if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
         else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
 
-        if (held == BTN_NONE) marquee_popup_ts = 0;
+        if (held == BTN_NONE) { marquee_popup_ts = 0; draw_marquee_frame(); }
         else if (now - marquee_popup_ts > 400) {
             marquee_popup_ts = now;
             if (held == BTN_D) {
                 marquee_exit_popup = false;
+                marquee_need_init = true;
                 audio_running = false;
+                if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
                 i2s_channel_disable(tx_chan);
                 if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
                 current_state = STATE_MENU;
@@ -794,7 +803,9 @@ static void handle_gif(int btn) {
 
         if (btn == BTN_D) {
             gif_exit_popup = false;
+            gif_need_init = true;
             audio_running = false;
+            if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
             i2s_channel_disable(tx_chan);
             free_gif_frames();
             current_state = STATE_MENU;
@@ -811,12 +822,14 @@ static void handle_gif(int btn) {
         if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
         else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
 
-        if (held == BTN_NONE) gif_popup_ts = 0;
+        if (held == BTN_NONE) { gif_popup_ts = 0; draw_gif_frame(); }
         else if (now - gif_popup_ts > 400) {
             gif_popup_ts = now;
             if (held == BTN_D) {
                 gif_exit_popup = false;
+                gif_need_init = true;
                 audio_running = false;
+                if (audio_task_handle) { vTaskDelay(pdMS_TO_TICKS(100)); }
                 i2s_channel_disable(tx_chan);
                 free_gif_frames();
                 current_state = STATE_MENU;
@@ -909,11 +922,8 @@ extern "C" void app_main() {
         switch (current_state) {
             case STATE_MENU:
             case STATE_IMG:
-                // 菜单和图片浏览器: 只响应按键
-                if (btn != BTN_NONE) {
-                    if (current_state == STATE_MENU) handle_menu(btn);
-                    else handle_img(btn);
-                }
+                if (current_state == STATE_MENU) handle_menu(btn);
+                else handle_img(btn);
                 vTaskDelay(pdMS_TO_TICKS(10));
                 break;
 
