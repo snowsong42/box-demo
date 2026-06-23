@@ -467,19 +467,28 @@ static void handle_img(int btn) {
     }
 
     if (img_exit_popup) {
-        if (btn == BTN_D) {
-            img_exit_popup = false;
-            audio_running = false;
-            i2s_channel_disable(tx_chan);
-            current_state = STATE_MENU;
-            img_need_init = true;
-            return;
+        static int64_t img_popup_ts = 0;
+        int64_t now = esp_timer_get_time() / 1000;
+        int held = BTN_NONE;
+        if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
+        else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
+        if (held != BTN_NONE && now - img_popup_ts > 400) {
+            img_popup_ts = now;
+            if (held == BTN_D) {
+                img_exit_popup = false;
+                audio_running = false;
+                i2s_channel_disable(tx_chan);
+                current_state = STATE_MENU;
+                img_need_init = true;
+                return;
+            }
+            if (held == BTN_U) {
+                img_exit_popup = false;
+                draw_img_browser();
+                return;
+            }
         }
-        if (btn == BTN_U) {
-            img_exit_popup = false;
-            draw_img_browser();
-            return;
-        }
+        if (held == BTN_NONE) img_popup_ts = 0;
         return;
     }
 
@@ -576,20 +585,29 @@ static void handle_marquee(int btn) {
     }
 
     if (marquee_exit_popup) {
-        if (btn == BTN_D) {
-            marquee_exit_popup = false;
-            audio_running = false;
-            i2s_channel_disable(tx_chan);
-            if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
-            current_state = STATE_MENU;
-            marquee_need_init = true;
-            return;
+        static int64_t marquee_popup_ts = 0;
+        int64_t now = esp_timer_get_time() / 1000;
+        int held = BTN_NONE;
+        if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
+        else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
+        if (held != BTN_NONE && now - marquee_popup_ts > 400) {
+            marquee_popup_ts = now;
+            if (held == BTN_D) {
+                marquee_exit_popup = false;
+                audio_running = false;
+                i2s_channel_disable(tx_chan);
+                if (marquee_raw) { heap_caps_free(marquee_raw); marquee_raw = nullptr; }
+                current_state = STATE_MENU;
+                marquee_need_init = true;
+                return;
+            }
+            if (held == BTN_U) {
+                marquee_exit_popup = false;
+                draw_marquee_frame();
+                return;
+            }
         }
-        if (btn == BTN_U) {
-            marquee_exit_popup = false;
-            draw_marquee_frame();
-            return;
-        }
+        if (held == BTN_NONE) marquee_popup_ts = 0;
         return;
     }
 
@@ -718,20 +736,29 @@ static void handle_gif(int btn) {
     }
 
     if (gif_exit_popup) {
-        if (btn == BTN_D) {
-            gif_exit_popup = false;
-            audio_running = false;
-            i2s_channel_disable(tx_chan);
-            free_gif_frames();
-            current_state = STATE_MENU;
-            gif_need_init = true;
-            return;
+        static int64_t gif_popup_ts = 0;
+        int64_t now = esp_timer_get_time() / 1000;
+        int held = BTN_NONE;
+        if (gpio_get_level(BTN_DOWN) == 0) held = BTN_D;
+        else if (gpio_get_level(BTN_UP) == 0) held = BTN_U;
+        if (held != BTN_NONE && now - gif_popup_ts > 400) {
+            gif_popup_ts = now;
+            if (held == BTN_D) {
+                gif_exit_popup = false;
+                audio_running = false;
+                i2s_channel_disable(tx_chan);
+                free_gif_frames();
+                current_state = STATE_MENU;
+                gif_need_init = true;
+                return;
+            }
+            if (held == BTN_U) {
+                gif_exit_popup = false;
+                draw_gif_frame();
+                return;
+            }
         }
-        if (btn == BTN_U) {
-            gif_exit_popup = false;
-            draw_gif_frame();
-            return;
-        }
+        if (held == BTN_NONE) gif_popup_ts = 0;
         return;
     }
 
