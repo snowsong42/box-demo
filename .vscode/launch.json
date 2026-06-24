@@ -2,9 +2,21 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "type": "gdbtarget",
-      "request": "attach",
-      "name": "Eclipse CDT GDB Adapter"
+      "name": "ESP32-S3 OpenOCD",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/box-demo.elf",
+      "cwd": "${workspaceFolder}",
+      "miDebuggerPath": "C:/Espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gdb.exe",
+      "miDebuggerServerAddress": "localhost:3333",
+      "stopAtEntry": true,
+      "setupCommands": [
+        {
+          "description": "Enable GDB pretty-printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
     }
   ]
 }
