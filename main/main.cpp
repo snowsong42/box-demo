@@ -822,7 +822,7 @@ extern "C" void app_main() {
     ESP_LOGI(TAG, "===== box-demo Starting =====");
 
     tft.init();
-    tft.setRotation(1);
+    tft.setRotation(3);
     tft.setBrightness(255);
     ESP_LOGI(TAG, "TFT: %ldx%ld", tft.width(), tft.height());
 
