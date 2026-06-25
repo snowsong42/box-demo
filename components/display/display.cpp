@@ -7,6 +7,7 @@
 #include "display.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
@@ -489,9 +490,9 @@ void draw_network_menu(int sub_selection, bool wifi_connected,
 // ==================== 网络测试结果页 ====================
 
 #define RESULT_TITLE_Y  (TAB_H + 4)
-#define RESULT_BODY_Y   (TAB_H + 24)
-#define RESULT_LINE_H   16
-#define RESULT_HINT_Y   230
+#define RESULT_BODY_Y   (TAB_H + 22)
+#define RESULT_LINE_H   18
+#define RESULT_HINT_Y   228
 
 void draw_network_result(const char *title, const char *body,
                          int scroll_offset, int max_lines, bool running)
@@ -499,54 +500,59 @@ void draw_network_result(const char *title, const char *body,
     s_backbuffer.fillScreen(COLOR_BLACK);
 
     // 标题
-    s_backbuffer.fillRect(0, RESULT_TITLE_Y, 320, 18, 0x1082);
+    s_backbuffer.fillRect(0, RESULT_TITLE_Y, 320, 16, 0x1082);
     s_backbuffer.setTextColor(COLOR_CYAN);
     s_backbuffer.setTextSize(1);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
     char title_buf[64];
     snprintf(title_buf, sizeof(title_buf), "%s %s", title, running ? "..." : "[Done]");
-    s_backbuffer.drawString(title_buf, 160, RESULT_TITLE_Y + 9);
+    s_backbuffer.drawString(title_buf, 160, RESULT_TITLE_Y + 8);
 
-    // 结果内容（滚动文本）
-    if (body) {
-        // 分割行并绘制
-        const char *lines[80];
-        int line_count = 0;
+    // 结果内容（滚动文本 — 自动换行）
+    if (body && body[0]) {
+        const int MAX_CHARS = 30;  // 每行最多字符数（1.5 号字体约 30 字/行）
+
+        // 先将所有源行展开为显示行（含换行处理）
+        char *display_lines[120];
+        int total_lines = 0;
         const char *p = body;
-        const char *line_start = p;
 
-        while (*p && line_count < 80) {
-            if (*p == '\n') {
-                lines[line_count++] = line_start;
-                line_start = p + 1;
+        while (*p && total_lines < 120) {
+            // 找到下一段（到 \n 或 \0）
+            const char *seg_end = p;
+            while (*seg_end && *seg_end != '\n') seg_end++;
+            int seg_len = seg_end - p;
+
+            // 将这一段按 MAX_CHARS 分成多行
+            int pos = 0;
+            while (pos < seg_len && total_lines < 120) {
+                int chunk = seg_len - pos;
+                if (chunk > MAX_CHARS) chunk = MAX_CHARS;
+                char *line = (char *)malloc(chunk + 1);
+                memcpy(line, p + pos, chunk);
+                line[chunk] = '\0';
+                display_lines[total_lines++] = line;
+                pos += chunk;
             }
-            p++;
-        }
-        if (line_start < p && line_count < 80) {
-            lines[line_count++] = line_start;
+            p = seg_end;
+            if (*p == '\n') p++;
         }
 
-        if (scroll_offset > line_count - max_lines) {
-            scroll_offset = (line_count > max_lines) ? line_count - max_lines : 0;
-        }
+        if (scroll_offset > total_lines - max_lines)
+            scroll_offset = (total_lines > max_lines) ? total_lines - max_lines : 0;
         if (scroll_offset < 0) scroll_offset = 0;
 
         s_backbuffer.setTextColor(COLOR_WHITE);
-        s_backbuffer.setTextSize(1);
+        s_backbuffer.setTextSize(1.5f);
         s_backbuffer.setTextDatum(textdatum_t::top_left);
 
-        for (int i = 0; i < max_lines && (i + scroll_offset) < line_count; i++) {
-            int li = i + scroll_offset;
-            int len = 0;
-            const char *lp = lines[li];
-            while (lp[len] && lp[len] != '\n') len++;
-            if (len > 42) len = 42;
-
-            char line_buf[43];
-            memcpy(line_buf, lines[li], len);
-            line_buf[len] = '\0';
-            s_backbuffer.drawString(line_buf, 4, RESULT_BODY_Y + i * RESULT_LINE_H);
+        for (int i = 0; i < max_lines && (i + scroll_offset) < total_lines; i++) {
+            s_backbuffer.drawString(display_lines[i + scroll_offset],
+                                    4, RESULT_BODY_Y + i * RESULT_LINE_H);
         }
+
+        // 释放临时行
+        for (int i = 0; i < total_lines; i++) free(display_lines[i]);
     }
 
     // 底部提示

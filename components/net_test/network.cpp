@@ -270,6 +270,7 @@ static void ping_test_task(void *arg)
 
     snprintf(line, sizeof(line), "Connectivity test complete.");
     result_callback(line);
+    s_test_task = NULL;
     s_test_running = false;
     vTaskDelete(NULL);
 }
@@ -299,6 +300,7 @@ static void http_test_task(void *arg)
     esp_http_client_config_t cfg = {};
     cfg.url = url;
     cfg.timeout_ms = 5000;
+    cfg.disable_auto_redirect = true;
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
 
     esp_err_t err = esp_http_client_perform(client);
@@ -333,6 +335,7 @@ static void http_test_task(void *arg)
 
     esp_http_client_cleanup(client);
     result_callback("HTTP test complete.");
+    s_test_task = NULL;
     s_test_running = false;
     vTaskDelete(NULL);
 }
@@ -345,7 +348,7 @@ void http_get_start(const char *url, net_result_cb_t callback)
     s_result_cb = callback;
     s_test_running = true;
 
-    char *url_copy = strdup(url ? url : "http://baidu.com");
+    char *url_copy = strdup(url ? url : "http://httpbin.org/get");
     xTaskCreate(http_test_task, "http_test", 8192, url_copy, 5, &s_test_task);
 }
 
@@ -374,6 +377,7 @@ static void tcp_test_task(void *arg)
     if (getaddrinfo(host, port_str, &hints, &res) != 0) {
         snprintf(line, sizeof(line), "DNS resolve failed: %s", host);
         result_callback(line);
+        s_test_task = NULL;
         s_test_running = false;
         vTaskDelete(NULL);
         return;
@@ -383,6 +387,7 @@ static void tcp_test_task(void *arg)
     if (sock < 0) {
         result_callback("Socket create failed");
         freeaddrinfo(res);
+        s_test_task = NULL;
         s_test_running = false;
         vTaskDelete(NULL);
         return;
@@ -398,6 +403,7 @@ static void tcp_test_task(void *arg)
         result_callback(line);
         close(sock);
         freeaddrinfo(res);
+        s_test_task = NULL;
         s_test_running = false;
         vTaskDelete(NULL);
         return;
@@ -405,11 +411,12 @@ static void tcp_test_task(void *arg)
     freeaddrinfo(res);
     result_callback("Connected!");
 
-    // 发送测试数据
-    const char *send_data = "Hello from ESP32-S3 box-demo!\r\n";
+    // 发送 HTTP 请求
+    char send_data[128];
+    snprintf(send_data, sizeof(send_data),
+             "GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
     int sent = send(sock, send_data, strlen(send_data), 0);
-    snprintf(line, sizeof(line), "Sent: %d bytes -> \"%s\"", sent,
-             sent > 0 ? send_data : "FAIL");
+    snprintf(line, sizeof(line), "Sent: %d bytes", sent);
     result_callback(line);
 
     // 接收响应
@@ -426,6 +433,7 @@ static void tcp_test_task(void *arg)
 
     close(sock);
     result_callback("TCP test complete.");
+    s_test_task = NULL;
     s_test_running = false;
     vTaskDelete(NULL);
 }
@@ -470,6 +478,9 @@ bool network_test_running(void)
 #include "esp_http_server.h"
 
 static httpd_handle_t s_prov_server = NULL;
+static volatile bool s_prov_done = false;
+
+bool wifi_prov_is_done(void) { return s_prov_done; }
 
 // 配网页 HTML（内嵌）
 static const char PROV_HTML[] = R"raw(
@@ -483,27 +494,32 @@ h2{color:#00d4ff;text-align:center}
 label{display:block;margin:8px 0 4px;color:#aaa}
 select,input{width:100%;padding:10px;border-radius:6px;border:none;background:#0f3460;color:#fff;font-size:16px;box-sizing:border-box}
 button{width:100%;padding:12px;border:none;border-radius:8px;background:#00d4ff;color:#000;font-size:18px;font-weight:bold;margin-top:12px;cursor:pointer}
+.btn2{background:#0f3460;color:#00d4ff}
 #status{margin-top:12px;text-align:center;font-size:14px;color:#aaa}
 </style></head><body>
 <h2>box-demo WiFi Setup</h2>
 <div class="card">
-<label>Select WiFi Network</label>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+<label style="margin:0;color:#aaa">WiFi Networks</label>
+<button class="btn2" onclick="scan()" style="width:auto;padding:5px 14px;margin:0;font-size:13px">Scan</button>
+</div>
 <select id="ssid_list" onchange="document.getElementById('ssid').value=this.value">
-<option value="">-- Scanning... --</option></select>
+<option value="">-- Press Scan --</option></select>
 <label>or enter SSID</label>
 <input id="ssid" placeholder="WiFi name">
-<label>Password</label>
+<label>Password (AP: 12345678)</label>
 <input id="pass" type="password" placeholder="WiFi password">
 <button onclick="connect()">Connect</button>
 <div id="status"></div>
 </div>
 <script>
 async function scan(){
+ document.getElementById('ssid_list').innerHTML='<option>Scanning...</option>';
  try{
   let r=await fetch('/scan');let d=await r.json();
   let s=document.getElementById('ssid_list');
   s.innerHTML=d.map(w=>`<option value="${w.ssid}">${w.ssid} (${w.rssi}dBm)</option>`).join('');
- }catch(e){}
+ }catch(e){document.getElementById('ssid_list').innerHTML='<option>Scan failed</option>';}
 }
 function connect(){
  let ssid=document.getElementById('ssid').value;
@@ -514,7 +530,6 @@ function connect(){
   body:JSON.stringify({ssid:ssid,password:pass})})
  .then(r=>r.text()).then(t=>{document.getElementById('status').innerText=t;});
 }
-scan();setInterval(scan,3000);
 </script></body></html>
 )raw";
 
@@ -539,9 +554,30 @@ static esp_err_t prov_scan_handler(httpd_req_t *req)
     wifi_ap_record_t *ap_records = (wifi_ap_record_t *)calloc(ap_count, sizeof(wifi_ap_record_t));
     esp_wifi_scan_get_ap_records(&ap_count, ap_records);
 
-    char *json = (char *)calloc(1, ap_count * 80 + 4);
+    // 按 SSID 去重，保留信号最强的
+    int unique_count = 0;
+    for (int i = 0; i < ap_count; i++) {
+        bool dup = false;
+        for (int j = 0; j < unique_count; j++) {
+            if (strcmp((const char *)ap_records[i].ssid,
+                       (const char *)ap_records[j].ssid) == 0) {
+                // 同名：保留 RSSI 更高的
+                if (ap_records[i].rssi > ap_records[j].rssi) {
+                    ap_records[j] = ap_records[i];
+                }
+                dup = true;
+                break;
+            }
+        }
+        if (!dup && ap_records[i].ssid[0] != '\0') {
+            if (unique_count != i) ap_records[unique_count] = ap_records[i];
+            unique_count++;
+        }
+    }
+
+    char *json = (char *)calloc(1, unique_count * 80 + 4);
     strcat(json, "[");
-    for (int i = 0; i < ap_count && i < 16; i++) {
+    for (int i = 0; i < unique_count && i < 16; i++) {
         char entry[96];
         snprintf(entry, sizeof(entry), "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d}",
                  i > 0 ? "," : "", ap_records[i].ssid, ap_records[i].rssi, ap_records[i].authmode);
@@ -611,16 +647,14 @@ static esp_err_t prov_connect_handler(httpd_req_t *req)
     esp_wifi_connect();
 
     httpd_resp_sendstr(req, "OK: Connecting...");
-
-    // 延迟关闭 AP + 网页服务
-    vTaskDelay(pdMS_TO_TICKS(500));
-    wifi_prov_web_stop();
+    s_prov_done = true;  // 通知主循环清理
     return ESP_OK;
 }
 
 void wifi_prov_web_start(void)
 {
     ESP_LOGI(TAG, "Starting provisioning AP + web server...");
+    s_prov_done = false;
 
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(300));
@@ -629,10 +663,11 @@ void wifi_prov_web_start(void)
 
     wifi_config_t ap_cfg;
     memset(&ap_cfg, 0, sizeof(ap_cfg));
-    strncpy((char *)ap_cfg.ap.ssid, "box-demo", 32);  // 无密码
+    strncpy((char *)ap_cfg.ap.ssid, "box-demo", 32);
+    strncpy((char *)ap_cfg.ap.password, "12345678", 64);
     ap_cfg.ap.ssid_len = 8;
     ap_cfg.ap.channel = 1;
-    ap_cfg.ap.authmode = WIFI_AUTH_OPEN;               // 开放网络
+    ap_cfg.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
     ap_cfg.ap.max_connection = 3;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());

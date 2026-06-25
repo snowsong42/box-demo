@@ -56,6 +56,11 @@ void wifi_prov_web_start(void);
 void wifi_prov_web_stop(void);
 
 /**
+ * @brief 配网是否已完成（网页端提交了凭据）
+ */
+bool wifi_prov_is_done(void);
+
+/**
  * @brief 检查 WiFi 是否已连接
  */
 bool wifi_is_connected(void);

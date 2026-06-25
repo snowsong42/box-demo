@@ -293,7 +293,8 @@ static void handle_ping(int btn)
 {
     if (btn == BTN_B) {
         network_test_stop();
-        s_ping_started = false; s_net_prov_mode = false;
+        s_ping_started = false;
+        if (s_net_prov_mode) { wifi_prov_web_stop(); s_net_prov_mode = false; }
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -321,7 +322,7 @@ static void handle_ping(int btn)
     }
 
     draw_network_result("Ping Test", network_get_results(),
-                        s_net_scroll, 10, network_test_running());
+                        s_net_scroll, 7, network_test_running());
 }
 
 // ==================== HTTP Handler ====================
@@ -332,7 +333,8 @@ static void handle_http(int btn)
 {
     if (btn == BTN_B) {
         network_test_stop();
-        s_http_started = false; s_net_prov_mode = false;
+        s_http_started = false;
+        if (s_net_prov_mode) { wifi_prov_web_stop(); s_net_prov_mode = false; }
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -360,7 +362,7 @@ static void handle_http(int btn)
     }
 
     draw_network_result("HTTP GET", network_get_results(),
-                        s_net_scroll, 10, network_test_running());
+                        s_net_scroll, 7, network_test_running());
 }
 
 // ==================== TCP Handler ====================
@@ -371,7 +373,8 @@ static void handle_tcp(int btn)
 {
     if (btn == BTN_B) {
         network_test_stop();
-        s_tcp_started = false; s_net_prov_mode = false;
+        s_tcp_started = false;
+        if (s_net_prov_mode) { wifi_prov_web_stop(); s_net_prov_mode = false; }
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -399,7 +402,7 @@ static void handle_tcp(int btn)
     }
 
     draw_network_result("TCP Client", network_get_results(),
-                        s_net_scroll, 10, network_test_running());
+                        s_net_scroll, 7, network_test_running());
 }
 
 // ==================== WiFi 状态 Handler ====================
@@ -423,6 +426,12 @@ static bool s_wifi_cfg_ap_active = false;
 
 static void handle_wifi_config(int btn)
 {
+    // 配网完成（网页端提交了凭据）→ 清理 AP/HTTP Server
+    if (wifi_prov_is_done() && s_wifi_cfg_ap_active) {
+        wifi_prov_web_stop();
+        s_wifi_cfg_ap_active = false;
+    }
+
     if (btn == BTN_B) {
         if (s_wifi_cfg_ap_active) {
             wifi_prov_web_stop();
