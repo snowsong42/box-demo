@@ -11,7 +11,7 @@
         "IDF_TOOLS_PATH": "C:\\Users\\snowsong\\.espressif\\tools",
         "IDF_PYTHON_ENV_PATH": "C:\\Espressif\\tools\\python\\v6.0.1\\venv",
         "ESP_IDF_VERSION": "6.0.1",
-        "PATH": "C:\\Users\\snowsong\\.espressif\\tools\\cmake\\4.0.3\\bin;C:\\Users\\snowsong\\.espressif\\tools\\ninja\\1.12.1;C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts;C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3;${env:PATH}"
+        "PATH": "C:\\Espressif\\tools\\xtensa-esp-elf\\esp-15.2.0_20251204\\xtensa-esp-elf\\bin;C:\\Users\\snowsong\\.espressif\\tools\\cmake\\4.0.3\\bin;C:\\Users\\snowsong\\.espressif\\tools\\ninja\\1.12.1;C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts;C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3;${env:PATH}"
       }
     }
   },

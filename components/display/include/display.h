@@ -66,12 +66,12 @@ void draw_exit_popup(void);
 void draw_confirm_popup(int selection, const char *item_name);
 
 /**
- * @brief 绘制主菜单
+ * @brief 绘制主菜单（7 项滚动列表）
  *
- * @param selection 当前选中行
- * @param menu_popup 是否显示确认弹窗
+ * @param selection     当前选中项索引 (0..6)
+ * @param scroll_offset 顶部可见项索引（滚动偏移）
  */
-void draw_menu(int selection, bool menu_popup);
+void draw_menu(int selection, int scroll_offset);
 
 /**
  * @brief 绘制图片浏览器帧
@@ -80,28 +80,25 @@ void draw_menu(int selection, bool menu_popup);
  * @param img_count 图片总数
  * @param w_cache   宽缓存数组
  * @param h_cache   高缓存数组
- * @param exit_popup 是否显示退出弹窗
  */
 void draw_img_browser(int img_index, int img_count,
-                      int *w_cache, int *h_cache, bool exit_popup);
+                      int *w_cache, int *h_cache);
 
 /**
  * @brief 绘制走马灯帧
  *
  * @param raw_data     RGB565 图像数据（已加载到 PSRAM）
  * @param scroll_offset 当前滚动偏移
- * @param exit_popup   是否显示退出弹窗
  */
-void draw_marquee_frame(uint16_t *raw_data, int scroll_offset, bool exit_popup);
+void draw_marquee_frame(uint16_t *raw_data, int scroll_offset);
 
 /**
  * @brief 绘制 GIF 帧
  *
  * @param frame_idx 当前帧索引（0~27）
  * @param gif_speed 播放速度（1~20）
- * @param exit_popup 是否显示退出弹窗
  */
-void draw_gif_frame(int frame_idx, int gif_speed, bool exit_popup);
+void draw_gif_frame(int frame_idx, int gif_speed);
 
 // ==================== GIF 帧管理 ====================
 
@@ -121,6 +118,62 @@ void free_gif_frames(void);
  * @brief GIF 帧是否已加载
  */
 bool gif_frames_loaded(void);
+
+// ==================== 网络测试页 UI ====================
+
+/**
+ * @brief 绘制顶部 Tab 导航栏
+ *
+ * @param active_tab 当前激活的 Tab 索引（0=图片, 1=走马灯, 2=GIF, 3=网络）
+ */
+void draw_tab_bar(int active_tab);
+
+/**
+ * @brief 绘制网络测试子菜单
+ *
+ * @param sub_selection 当前选中的子项（0=Ping, 1=HTTP, 2=TCP, 3=WiFi状态）
+ * @param wifi_connected WiFi 是否已连接
+ * @param wifi_ssid      已连接的 SSID（可为 NULL）
+ * @param prov_mode      是否处于配网模式
+ */
+void draw_network_menu(int sub_selection, bool wifi_connected,
+                       const char *wifi_ssid, bool prov_mode);
+
+/**
+ * @brief 绘制网络测试结果页（滚动文本视图）
+ *
+ * @param title        页面标题
+ * @param body         结果文本（多行，换行符分隔）
+ * @param scroll_offset 滚动偏移（行数）
+ * @param max_lines    最大可见行数
+ * @param running      测试是否仍在运行
+ */
+void draw_network_result(const char *title, const char *body,
+                         int scroll_offset, int max_lines, bool running);
+
+/**
+ * @brief 绘制 WiFi 未连接提示页
+ */
+void draw_wifi_not_connected(void);
+
+/**
+ * @brief 绘制启动画面
+ */
+void draw_boot_screen(void);
+
+/**
+ * @brief 绘制 WiFi 状态大字体面板
+ */
+void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char *mac);
+
+/**
+ * @brief 绘制 WiFi 配置引导页
+ *
+ * @param ap_active   AP 是否已启动
+ * @param connected   WiFi 是否已连接
+ * @param ip          连接后的 IP 地址（可为 NULL）
+ */
+void draw_wifi_config_page(bool ap_active, bool connected, const char *ip);
 
 #ifdef __cplusplus
 }

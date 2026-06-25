@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "network.cpp"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_http_client
+        esp_http_server
+        esp_netif
+        lwip
+        esp_event
+        esp_timer
+)

@@ -72,42 +72,27 @@ void draw_exit_popup(void)
 
 // ==================== 主菜单 ====================
 
-static const int TBL_X = 18, TBL_Y = 55, TBL_W = 284, TBL_H = 140;
-static const int ROW_H = 45;
-static const int TITLE_Y = 25;
-static const int HINT_Y = 228;
+// ==================== 主菜单（7 项滚动） ====================
 
-static const char *menu_items[] = { "IMG Browser", "IMG Marquee", "GIF Player" };
-#define MENU_COUNT 3
+static const char *s_menu_items[] = {
+    "1. IMG Test",
+    "2. Marquee",
+    "3. GIF Test",
+    "4. Ping Test",
+    "5. HTTP GET",
+    "6. TCP Client",
+    "7. WIFI Status",
+    "8. WiFi Config",
+};
+#define MENU_COUNT  8
+#define MENU_VISIBLE 5
+#define MENU_TBL_X  18
+#define MENU_TBL_Y  50
+#define MENU_TBL_W  284
+#define MENU_ROW_H  34
+#define MENU_HINT_Y 228
 
-void draw_confirm_popup(int selection, const char *item_name)
-{
-    const int PW = 270, PH = 128;
-    const int PX = (320 - PW) / 2;
-    const int PY = (240 - PH) / 2;
-
-    s_backbuffer.fillRect(PX, PY, PW, PH, 0x0861);
-    s_backbuffer.drawRect(PX, PY, PW, PH, COLOR_WHITE);
-    s_backbuffer.drawRect(PX + 2, PY + 2, PW - 4, PH - 4, COLOR_WHITE);
-
-    s_backbuffer.setTextColor(COLOR_WHITE);
-    s_backbuffer.setTextSize(2);
-    s_backbuffer.setTextDatum(textdatum_t::middle_center);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Selected: %s", item_name);
-    s_backbuffer.drawString(buf, 160, PY + 24);
-
-    s_backbuffer.fillRect(PX + 15, PY + 44, PW - 30, 2, COLOR_CYAN);
-    s_backbuffer.drawString("Enter?", 160, PY + 68);
-
-    s_backbuffer.setTextSize(1.5f);
-    s_backbuffer.setTextColor(COLOR_CYAN);
-    s_backbuffer.drawString("Yes: ->", 100, PY + 100);
-    s_backbuffer.setTextColor(COLOR_GRAY);
-    s_backbuffer.drawString("No: <-", 220, PY + 100);
-}
-
-void draw_menu(int selection, bool menu_popup)
+void draw_menu(int selection, int scroll_offset)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
@@ -115,33 +100,55 @@ void draw_menu(int selection, bool menu_popup)
     s_backbuffer.setTextColor(COLOR_WHITE);
     s_backbuffer.setTextSize(4);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
-    s_backbuffer.drawString("box-demo", 160, TITLE_Y);
+    s_backbuffer.drawString("box-demo", 160, 22);
 
-    // 表格外框
-    s_backbuffer.drawRect(TBL_X, TBL_Y, TBL_W, TBL_H, COLOR_WHITE);
-    s_backbuffer.drawRect(TBL_X + 1, TBL_Y + 1, TBL_W - 2, TBL_H - 2, COLOR_GRAY);
+    // 表格外框（固定高度 = 可见行数 * 行高）
+    int tbl_h = MENU_VISIBLE * MENU_ROW_H;
+    s_backbuffer.drawRect(MENU_TBL_X, MENU_TBL_Y, MENU_TBL_W, tbl_h, COLOR_WHITE);
+    s_backbuffer.drawRect(MENU_TBL_X + 1, MENU_TBL_Y + 1, MENU_TBL_W - 2, tbl_h - 2, COLOR_GRAY);
 
-    for (int i = 0; i < MENU_COUNT; i++) {
-        int ry = TBL_Y + i * ROW_H;
+    for (int i = 0; i < MENU_VISIBLE; i++) {
+        int item_idx = scroll_offset + i;
+        if (item_idx >= MENU_COUNT) break;
 
+        int ry = MENU_TBL_Y + i * MENU_ROW_H;
+
+        // 行分隔线
         if (i > 0)
-            s_backbuffer.fillRect(TBL_X + 1, ry, TBL_W - 2, 1, COLOR_GRAY);
+            s_backbuffer.fillRect(MENU_TBL_X + 1, ry, MENU_TBL_W - 2, 1, COLOR_GRAY);
 
-        uint16_t row_bg = (i == selection) ? 0x18E3 : 0x0000;
-        s_backbuffer.fillRect(TBL_X + 2, ry + 1, TBL_W - 4, ROW_H - 2, row_bg);
+        // 高亮/普通行背景
+        uint16_t row_bg = (item_idx == selection) ? 0x18E3 : 0x0000;
+        s_backbuffer.fillRect(MENU_TBL_X + 2, ry + 1, MENU_TBL_W - 4, MENU_ROW_H - 2, row_bg);
 
-        s_backbuffer.setTextDatum(textdatum_t::middle_center);
-        if (i == selection) {
+        // 行号 + 文本
+        s_backbuffer.setTextDatum(textdatum_t::middle_left);
+        if (item_idx == selection) {
             s_backbuffer.setTextColor(COLOR_CYAN);
             s_backbuffer.setTextSize(1);
-            s_backbuffer.drawString(">", TBL_X + 25, ry + ROW_H / 2);
+            s_backbuffer.drawString(">", MENU_TBL_X + 12, ry + MENU_ROW_H / 2);
             s_backbuffer.setTextSize(2);
             s_backbuffer.setTextColor(COLOR_WHITE);
-            s_backbuffer.drawString(menu_items[i], 160, ry + ROW_H / 2);
         } else {
             s_backbuffer.setTextColor(COLOR_GRAY);
             s_backbuffer.setTextSize(2);
-            s_backbuffer.drawString(menu_items[i], 160, ry + ROW_H / 2);
+        }
+        s_backbuffer.drawString(s_menu_items[item_idx], MENU_TBL_X + 32, ry + MENU_ROW_H / 2);
+
+        // 滚动指示器
+        if (scroll_offset > 0 && i == 0) {
+            // 顶部有隐藏项 → 显示 ▲
+            s_backbuffer.setTextColor(0x632C);
+            s_backbuffer.setTextSize(1);
+            s_backbuffer.setTextDatum(textdatum_t::top_right);
+            s_backbuffer.drawString("▲", MENU_TBL_X + MENU_TBL_W - 8, ry + 2);
+        }
+        if (scroll_offset + MENU_VISIBLE < MENU_COUNT && i == MENU_VISIBLE - 1) {
+            // 底部有隐藏项 → 显示 ▼
+            s_backbuffer.setTextColor(0x632C);
+            s_backbuffer.setTextSize(1);
+            s_backbuffer.setTextDatum(textdatum_t::bottom_right);
+            s_backbuffer.drawString("▼", MENU_TBL_X + MENU_TBL_W - 8, ry + MENU_ROW_H - 2);
         }
     }
 
@@ -149,11 +156,9 @@ void draw_menu(int selection, bool menu_popup)
     s_backbuffer.setTextColor(0x632C);
     s_backbuffer.setTextSize(1);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
-    s_backbuffer.drawString("[UP][DOWN] Select    [RIGHT] Enter", 160, HINT_Y);
+    s_backbuffer.drawString("[UP][DOWN] Select    [START] Enter", 160, MENU_HINT_Y);
 
-    if (menu_popup) draw_confirm_popup(selection, menu_items[selection]);
-
-    // 一次性推屏
+    // 推屏
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -166,7 +171,7 @@ void draw_menu(int selection, bool menu_popup)
 #define IMG_HINT_Y  227
 
 void draw_img_browser(int img_index, int img_count,
-                      int *w_cache, int *h_cache, bool exit_popup)
+                      int *w_cache, int *h_cache)
 {
     int idx = img_index + 1;
     char path[32];
@@ -231,9 +236,7 @@ void draw_img_browser(int img_index, int img_count,
     heap_caps_free(png_buf);
 
     s_backbuffer.setTextColor(0x632C);
-    s_backbuffer.drawString("  [LEFT] Prev  [RIGHT] Next  [DOWN] Back  ", 160, IMG_HINT_Y);
-
-    if (exit_popup) draw_exit_popup();
+    s_backbuffer.drawString("[UP][DOWN] Prev/Next  [START] Audio  [BACK] Reset", 160, IMG_HINT_Y);
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
@@ -248,7 +251,7 @@ void draw_img_browser(int img_index, int img_count,
 #define MARQUEE_IMG_Y 41
 #define MARQUEE_HINT_Y 229
 
-void draw_marquee_frame(uint16_t *raw_data, int scroll_offset, bool exit_popup)
+void draw_marquee_frame(uint16_t *raw_data, int scroll_offset)
 {
     s_backbuffer.fillRect(0, 0, 320, MARQUEE_TOP_H, COLOR_BLACK);
 
@@ -266,9 +269,7 @@ void draw_marquee_frame(uint16_t *raw_data, int scroll_offset, bool exit_popup)
 
     s_backbuffer.fillRect(0, 218, 320, 22, COLOR_BLACK);
     s_backbuffer.setTextColor(0x632C);
-    s_backbuffer.drawString("[DOWN] Back", 160, MARQUEE_HINT_Y);
-
-    if (exit_popup) draw_exit_popup();
+    s_backbuffer.drawString("[UP][DOWN] Pause  [START] Audio  [BACK] Reset", 160, MARQUEE_HINT_Y);
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
@@ -336,7 +337,7 @@ bool gif_frames_loaded(void)
 #define GIF_FRAME_Y 14
 #define GIF_HINT_Y  227
 
-void draw_gif_frame(int frame_idx, int gif_speed, bool exit_popup)
+void draw_gif_frame(int frame_idx, int gif_speed)
 {
     s_backbuffer.fillRect(0, 0, 320, GIF_TOP_H, COLOR_BLACK);
 
@@ -361,9 +362,376 @@ void draw_gif_frame(int frame_idx, int gif_speed, bool exit_popup)
     s_backbuffer.fillRect(0, 214, 320, 26, COLOR_BLACK);
     s_backbuffer.setTextColor(0x632C);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
-    s_backbuffer.drawString("  [LEFT] Slower  [RIGHT] Faster  [DOWN] Back  ", 160, GIF_HINT_Y);
+    s_backbuffer.drawString("[UP][DOWN] Speed  [START] Audio  [BACK] Reset", 160, GIF_HINT_Y);
 
-    if (exit_popup) draw_exit_popup();
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== Tab 导航栏 ====================
+
+#define TAB_COUNT   4
+#define TAB_H       22
+#define TAB_SEP_X   80
+
+static const char *tab_labels[TAB_COUNT] = {
+    "IMG", "MARQUEE", "GIF", "NET"
+};
+
+void draw_tab_bar(int active_tab)
+{
+    int tab_w = 320 / TAB_COUNT;
+
+    for (int i = 0; i < TAB_COUNT; i++) {
+        int tx = i * tab_w;
+        uint16_t bg = (i == active_tab) ? 0x18E3 : 0x1082;
+        uint16_t fg = (i == active_tab) ? COLOR_WHITE : COLOR_GRAY;
+
+        s_backbuffer.fillRect(tx, 0, tab_w, TAB_H, bg);
+        if (i > 0) {
+            s_backbuffer.fillRect(tx, 2, 1, TAB_H - 4, 0x39C7);
+        }
+
+        // 激活 Tab 下方高亮条
+        if (i == active_tab) {
+            s_backbuffer.fillRect(tx + 3, TAB_H - 3, tab_w - 6, 3, COLOR_CYAN);
+        }
+
+        s_backbuffer.setTextColor(fg);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString(tab_labels[i], tx + tab_w / 2, TAB_H / 2);
+    }
+
+    // Tab 下方分隔线
+    s_backbuffer.fillRect(0, TAB_H, 320, 1, COLOR_WHITE);
+}
+
+// ==================== 网络测试子菜单 ====================
+
+#define NET_MENU_Y  (TAB_H + 4)
+#define NET_ROW_H   34
+#define NET_MENU_W  280
+#define NET_MENU_X  ((320 - NET_MENU_W) / 2)
+
+static const char *net_sub_items[] = {
+    "Ping Test",
+    "HTTP GET",
+    "TCP Client",
+    "WiFi Status"
+};
+#define NET_SUB_COUNT 4
+
+void draw_network_menu(int sub_selection, bool wifi_connected,
+                       const char *wifi_ssid, bool prov_mode)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+    int y0 = 4;
+
+    // WiFi 状态指示条
+    s_backbuffer.fillRect(0, y0, 320, 16, 0x1082);
+    s_backbuffer.setTextSize(1);
+    if (!wifi_connected) {
+        s_backbuffer.setTextColor(COLOR_YELLOW);
+        if (prov_mode) {
+            s_backbuffer.drawString("Provisioning: connect to box-demo-config",
+                                    6, y0 + 2);
+        } else {
+            s_backbuffer.drawString("WiFi not connected. Press START to config.",
+                                    6, y0 + 2);
+        }
+    } else {
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "WiFi: %s", wifi_ssid ? wifi_ssid : "Connected");
+        s_backbuffer.drawString(buf, 6, y0 + 2);
+    }
+    y0 += 18;
+
+    // 子菜单项
+    for (int i = 0; i < NET_SUB_COUNT; i++) {
+        int ry = y0 + i * NET_ROW_H;
+        uint16_t row_bg = (i == sub_selection) ? 0x18E3 : 0x0000;
+        s_backbuffer.fillRect(NET_MENU_X, ry, NET_MENU_W, NET_ROW_H - 1, row_bg);
+        s_backbuffer.drawRect(NET_MENU_X, ry, NET_MENU_W, NET_ROW_H - 1, 0x39C7);
+
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        if (i == sub_selection) {
+            s_backbuffer.setTextColor(COLOR_CYAN);
+            s_backbuffer.setTextSize(1);
+            s_backbuffer.drawString(">", NET_MENU_X + 16, ry + NET_ROW_H / 2);
+            s_backbuffer.setTextSize(2);
+            s_backbuffer.setTextColor(COLOR_WHITE);
+        } else {
+            s_backbuffer.setTextColor(COLOR_GRAY);
+            s_backbuffer.setTextSize(2);
+        }
+        s_backbuffer.drawString(net_sub_items[i], 160, ry + NET_ROW_H / 2);
+    }
+
+    // 底部提示
+    y0 += NET_SUB_COUNT * NET_ROW_H + 4;
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    if (prov_mode) {
+        s_backbuffer.drawString("[UP][DOWN] Select    [START] Config    [BACK] Cancel", 160, y0 + 2);
+    } else {
+        s_backbuffer.drawString("[UP][DOWN] Select    [START] Enter", 160, y0 + 2);
+    }
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== 网络测试结果页 ====================
+
+#define RESULT_TITLE_Y  (TAB_H + 4)
+#define RESULT_BODY_Y   (TAB_H + 24)
+#define RESULT_LINE_H   16
+#define RESULT_HINT_Y   230
+
+void draw_network_result(const char *title, const char *body,
+                         int scroll_offset, int max_lines, bool running)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    // 标题
+    s_backbuffer.fillRect(0, RESULT_TITLE_Y, 320, 18, 0x1082);
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    char title_buf[64];
+    snprintf(title_buf, sizeof(title_buf), "%s %s", title, running ? "..." : "[Done]");
+    s_backbuffer.drawString(title_buf, 160, RESULT_TITLE_Y + 9);
+
+    // 结果内容（滚动文本）
+    if (body) {
+        // 分割行并绘制
+        const char *lines[80];
+        int line_count = 0;
+        const char *p = body;
+        const char *line_start = p;
+
+        while (*p && line_count < 80) {
+            if (*p == '\n') {
+                lines[line_count++] = line_start;
+                line_start = p + 1;
+            }
+            p++;
+        }
+        if (line_start < p && line_count < 80) {
+            lines[line_count++] = line_start;
+        }
+
+        if (scroll_offset > line_count - max_lines) {
+            scroll_offset = (line_count > max_lines) ? line_count - max_lines : 0;
+        }
+        if (scroll_offset < 0) scroll_offset = 0;
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.setTextDatum(textdatum_t::top_left);
+
+        for (int i = 0; i < max_lines && (i + scroll_offset) < line_count; i++) {
+            int li = i + scroll_offset;
+            int len = 0;
+            const char *lp = lines[li];
+            while (lp[len] && lp[len] != '\n') len++;
+            if (len > 42) len = 42;
+
+            char line_buf[43];
+            memcpy(line_buf, lines[li], len);
+            line_buf[len] = '\0';
+            s_backbuffer.drawString(line_buf, 4, RESULT_BODY_Y + i * RESULT_LINE_H);
+        }
+    }
+
+    // 底部提示
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    if (running) {
+        s_backbuffer.drawString("[BACK] Stop & Return", 160, RESULT_HINT_Y);
+    } else {
+        s_backbuffer.drawString("[UP][DOWN] Scroll    [START] Rerun    [BACK] Return", 160, RESULT_HINT_Y);
+    }
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== WiFi 未连接提示页 ====================
+
+void draw_wifi_not_connected(void)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_YELLOW);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("WiFi Not Connected", 160, 60);
+
+    s_backbuffer.setTextColor(COLOR_WHITE);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.drawString("Press", 160, 110);
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.drawString("[START]", 160, 140);
+    s_backbuffer.setTextColor(COLOR_WHITE);
+    s_backbuffer.drawString("to configure WiFi", 160, 170);
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== 启动画面 ====================
+
+void draw_boot_screen(void)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_WHITE);
+    s_backbuffer.setTextSize(4);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("box-demo", 160, 80);
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.drawString("Starting...", 160, 140);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== WiFi 状态大字体面板 ====================
+
+void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char *mac)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("WiFi Status", 160, 16);
+
+    s_backbuffer.fillRect(20, 34, 280, 2, COLOR_WHITE);
+
+    char buf[48];
+    int y = 50;
+
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::top_left);
+    s_backbuffer.drawString("SSID:", 24, y);
+    s_backbuffer.setTextColor(COLOR_WHITE);
+    s_backbuffer.setTextSize(2);
+    snprintf(buf, sizeof(buf), "%s", ssid[0] ? ssid : "--");
+    s_backbuffer.drawString(buf, 24, y + 12);
+
+    y += 48;
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("IP Address:", 24, y);
+    s_backbuffer.setTextColor(COLOR_GREEN);
+    s_backbuffer.setTextSize(2);
+    snprintf(buf, sizeof(buf), "%s", ip[0] ? ip : "0.0.0.0");
+    s_backbuffer.drawString(buf, 24, y + 12);
+
+    y += 48;
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("Signal:", 24, y);
+    uint16_t rssi_color = (rssi > -60) ? COLOR_GREEN : (rssi > -75) ? COLOR_YELLOW : COLOR_RED;
+    s_backbuffer.setTextColor(rssi_color);
+    s_backbuffer.setTextSize(2);
+    snprintf(buf, sizeof(buf), "%d dBm", rssi);
+    s_backbuffer.drawString(buf, 24, y + 12);
+
+    y += 48;
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("MAC:", 24, y);
+    s_backbuffer.setTextColor(COLOR_WHITE);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.drawString(mac, 24, y + 12);
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[BACK] Return", 160, 228);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== WiFi 配置引导页 ====================
+
+void draw_wifi_config_page(bool ap_active, bool connected, const char *ip)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    if (connected) {
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Connected!", 160, 80);
+
+        char buf[48];
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        snprintf(buf, sizeof(buf), "IP: %s", ip ? ip : "N/A");
+        s_backbuffer.drawString(buf, 160, 130);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
+    } else if (ap_active) {
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("WiFi Setup Active", 160, 30);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("1. Connect phone to:", 160, 70);
+        s_backbuffer.setTextColor(COLOR_YELLOW);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("box-demo", 160, 100);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("2. Open browser:", 160, 140);
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("192.168.4.1", 160, 170);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Cancel", 160, 225);
+    } else {
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Press", 160, 90);
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.drawString("[START]", 160, 125);
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.drawString("to begin WiFi setup", 160, 160);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
+    }
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);

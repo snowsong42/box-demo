@@ -6,25 +6,26 @@
 
 /**
  * @file main.cpp
- * @brief 应用入口 + 状态机调度
+ * @brief 应用入口 + 竖直菜单状态机
  *
- * 组件化架构：buttons / display / storage / audio 各司其职，
- * main 仅负责初始化编排和状态机分发。
+ * 7 项菜单：IMG / Marquee / GIF / Ping / HTTP / TCP / WiFi
+ * UP/DOWN 选择（带滚动），START 进入，BACK 返回。
  */
 
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
 
 #include "buttons.h"
 #include "display.h"
 #include "storage.h"
 #include "audio.h"
+#include "network.h"
 
 static const char *TAG = "main";
 
@@ -34,105 +35,105 @@ enum AppState {
     STATE_IMG,
     STATE_MARQUEE,
     STATE_GIF,
+    STATE_PING,
+    STATE_HTTP,
+    STATE_TCP,
+    STATE_WIFI_STATUS,
+    STATE_WIFI_CONFIG,
 };
 static AppState s_current_state = STATE_MENU;
 
-// ==================== 全局动作冷却 ====================
-static int64_t s_last_action_time = 0;
-
 // ==================== 菜单状态 ====================
-static int s_menu_selection = 0;
-static bool s_menu_popup = false;
-static bool s_menu_popup_armed = false;
+#define MENU_ITEMS 8
+#define MENU_VISIBLE 5          // 可见行数
+static int s_menu_sel = 0;      // 当前选中项 (0..6)
+static int s_menu_scroll = 0;   // 滚动偏移（顶部显示的项索引）
 
-// ==================== 图片浏览器状态 ====================
+// ==================== IMG 状态 ====================
 static int s_img_index = 0;
 static int s_img_count = 0;
 static int s_img_w_cache[100];
 static int s_img_h_cache[100];
 static bool s_img_need_init = true;
-static bool s_img_exit_popup = false;
-static bool s_img_exit_armed = false;
 
-// ==================== 走马灯状态 ====================
+// ==================== MARQUEE 状态 ====================
 static bool s_marquee_need_init = true;
 static uint16_t *s_marquee_raw = nullptr;
 static int s_scroll_offset = 0;
-static bool s_marquee_exit_popup = false;
-static bool s_marquee_exit_armed = false;
+static bool s_marquee_paused = false;
 
 // ==================== GIF 状态 ====================
 static bool s_gif_need_init = true;
 static int s_gif_speed = 18;
 static int s_gif_frame_idx = 0;
 static int64_t s_gif_last_frame_time = 0;
-static bool s_gif_exit_popup = false;
-static bool s_gif_exit_armed = false;
+
+// ==================== 网络测试共用状态 ====================
+static bool s_net_prov_mode = false;
+static int s_net_scroll = 0;
 
 // ==================== 函数声明 ====================
 static void handle_menu(int btn);
 static void handle_img(int btn);
 static void handle_marquee(int btn);
 static void handle_gif(int btn);
+static void handle_ping(int btn);
+static void handle_http(int btn);
+static void handle_tcp(int btn);
+static void handle_wifi_status(int btn);
+static void handle_wifi_config(int btn);
 
 // ==================== 主菜单 Handler ====================
 
 /**
- * @brief 处理主菜单按键：UP/DOWN 选择，RIGHT 确认（弹窗），LEFT 取消
+ * @brief 7 项滚动菜单：UP/DOWN 选，START 进入
  */
 static void handle_menu(int btn)
 {
-    if (s_menu_popup) {
-        bool yes = (gpio_get_level(BTN_RIGHT) == 0);
-        bool no  = (gpio_get_level(BTN_LEFT) == 0);
-        if (!yes && !no) s_menu_popup_armed = false;
-        if (s_menu_popup_armed) { draw_menu(s_menu_selection, s_menu_popup); return; }
+    switch (btn) {
+        case BTN_U:
+            if (s_menu_sel > 0) {
+                s_menu_sel--;
+                if (s_menu_sel < s_menu_scroll) s_menu_scroll = s_menu_sel;
+            }
+            break;
+        case BTN_D:
+            if (s_menu_sel < MENU_ITEMS - 1) {
+                s_menu_sel++;
+                if (s_menu_sel >= s_menu_scroll + MENU_VISIBLE)
+                    s_menu_scroll = s_menu_sel - MENU_VISIBLE + 1;
+            }
+            break;
+        case BTN_S:
+            ESP_LOGI(TAG, "Menu enter: %d", s_menu_sel);
+            switch (s_menu_sel) {
+                case 0: s_current_state = STATE_IMG;    break;
+                case 1: s_current_state = STATE_MARQUEE; break;
+                case 2: s_current_state = STATE_GIF;     break;
+                case 3: s_current_state = STATE_PING;    break;
+                case 4: s_current_state = STATE_HTTP;    break;
+                case 5: s_current_state = STATE_TCP;     break;
+                case 6: s_current_state = STATE_WIFI_STATUS; break;
+                case 7: s_current_state = STATE_WIFI_CONFIG; break;
+            }
+            return;
+        default: break;
+    }
+    draw_menu(s_menu_sel, s_menu_scroll);
+}
 
-        int64_t now = esp_timer_get_time() / 1000;
-        if (yes && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "ENTER: %s", s_menu_selection == 0 ? "IMG Browser"
-                              : s_menu_selection == 1 ? "IMG Marquee" : "GIF Player");
-            s_menu_popup = false;
-            s_current_state = (AppState)(STATE_IMG + s_menu_selection);
-            draw_menu(s_menu_selection, s_menu_popup);
-        } else if (no && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "CANCEL");
-            s_menu_popup = false;
-            draw_menu(s_menu_selection, s_menu_popup);
-        } else {
-            draw_menu(s_menu_selection, s_menu_popup);
-        }
+// ==================== IMG Handler ====================
+
+static void handle_img(int btn)
+{
+    if (btn == BTN_B) {
+        s_img_need_init = true;
+        audio_stop();
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
         return;
     }
 
-    switch (btn) {
-        case BTN_U:
-            s_menu_selection = (s_menu_selection - 1 + 3) % 3;
-            draw_menu(s_menu_selection, s_menu_popup);
-            break;
-        case BTN_D:
-            s_menu_selection = (s_menu_selection + 1) % 3;
-            draw_menu(s_menu_selection, s_menu_popup);
-            break;
-        case BTN_R:
-            ESP_LOGI(TAG, "POPUP: enter %s", s_menu_selection == 0 ? "IMG Browser"
-                                : s_menu_selection == 1 ? "IMG Marquee" : "GIF Player");
-            s_menu_popup = true;
-            s_menu_popup_armed = true;
-            draw_menu(s_menu_selection, s_menu_popup);
-            break;
-    }
-}
-
-// ==================== 图片浏览器 Handler ====================
-
-/**
- * @brief 处理图片浏览器按键：LEFT/RIGHT 翻页，DOWN 退出（弹窗）
- */
-static void handle_img(int btn)
-{
     if (s_img_need_init) {
         LGFX_Sprite *bb = display_backbuffer();
         bb->fillScreen(COLOR_BLACK);
@@ -144,14 +145,11 @@ static void handle_img(int btn)
         display_tft()->endWrite();
 
         s_img_count = detect_img_count();
-        ESP_LOGI(TAG, "INIT: IMG browser (%d images)", s_img_count);
         s_img_index = 0;
         s_img_need_init = false;
-        s_img_exit_popup = false;
         memset(s_img_w_cache, 0, sizeof(s_img_w_cache));
         memset(s_img_h_cache, 0, sizeof(s_img_h_cache));
 
-        // 缓存 PNG 尺寸
         for (int i = 0; i < s_img_count; i++) {
             char path[32];
             snprintf(path, sizeof(path), "/spiffs/%04d.png", i + 1);
@@ -159,61 +157,37 @@ static void handle_img(int btn)
         }
 
         if (!audio_is_running()) audio_start();
-        draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
-        return;
-    }
-
-    if (s_img_exit_popup) {
-        bool yes = (gpio_get_level(BTN_DOWN) == 0);
-        bool no  = (gpio_get_level(BTN_UP) == 0);
-        if (!yes && !no) s_img_exit_armed = false;
-        if (s_img_exit_armed) { draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup); return; }
-
-        int64_t now = esp_timer_get_time() / 1000;
-        if (yes && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "EXIT: IMG -> MENU");
-            s_img_exit_popup = false;
-            s_img_need_init = true;
-            audio_stop();
-            s_current_state = STATE_MENU;
-            draw_menu(s_menu_selection, s_menu_popup);
-        } else if (no && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "CANCEL");
-            s_img_exit_popup = false;
-            draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
-        } else {
-            draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
-        }
+        draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache);
         return;
     }
 
     switch (btn) {
-        case BTN_L:
+        case BTN_U:
             s_img_index = (s_img_index - 1 + s_img_count) % s_img_count;
-            draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
-            break;
-        case BTN_R:
-            s_img_index = (s_img_index + 1) % s_img_count;
-            draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
             break;
         case BTN_D:
-            ESP_LOGI(TAG, "POPUP: exit IMG?");
-            s_img_exit_popup = true;
-            s_img_exit_armed = true;
-            draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache, s_img_exit_popup);
+            s_img_index = (s_img_index + 1) % s_img_count;
             break;
+        case BTN_S:
+            if (audio_is_running()) audio_stop(); else audio_start();
+            break;
+        default: break;
     }
+    draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache);
 }
 
-// ==================== 走马灯 Handler ====================
+// ==================== MARQUEE Handler ====================
 
-/**
- * @brief 处理走马灯：自动滚动推进，DOWN 退出（弹窗）
- */
 static void handle_marquee(int btn)
 {
+    if (btn == BTN_B) {
+        s_marquee_need_init = true;
+        audio_stop();
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
     if (s_marquee_need_init) {
         LGFX_Sprite *bb = display_backbuffer();
         bb->fillScreen(COLOR_BLACK);
@@ -224,76 +198,48 @@ static void handle_marquee(int btn)
         bb->pushSprite(display_tft(), 0, 0);
         display_tft()->endWrite();
 
-        ESP_LOGI(TAG, "INIT: Marquee 500x150");
-        s_marquee_exit_popup = false;
         s_scroll_offset = 0;
+        s_marquee_paused = false;
         if (!s_marquee_raw) {
             FILE *fp = fopen("/spiffs/500x150.raw", "rb");
             if (fp) {
                 size_t sz = 500UL * 150 * 2;
                 s_marquee_raw = (uint16_t *)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
-                if (s_marquee_raw) {
-                    fread(s_marquee_raw, 1, sz, fp);
-                    ESP_LOGI(TAG, "Marquee raw loaded: 500x150");
-                }
+                if (s_marquee_raw) fread(s_marquee_raw, 1, sz, fp);
                 fclose(fp);
-            } else {
-                ESP_LOGE(TAG, "Marquee raw fopen failed");
             }
         }
         s_marquee_need_init = false;
 
         if (!audio_is_running()) audio_start();
-        draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup);
+        draw_marquee_frame(s_marquee_raw, s_scroll_offset);
         return;
     }
 
-    if (s_marquee_exit_popup) {
-        bool yes = (gpio_get_level(BTN_DOWN) == 0);
-        bool no  = (gpio_get_level(BTN_UP) == 0);
-        if (!yes && !no) s_marquee_exit_armed = false;
-        if (s_marquee_exit_armed) { draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup); return; }
-
-        int64_t now = esp_timer_get_time() / 1000;
-        if (yes && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "EXIT: Marquee -> MENU");
-            s_marquee_exit_popup = false;
-            s_marquee_need_init = true;
-            audio_stop();
-            if (s_marquee_raw) { heap_caps_free(s_marquee_raw); s_marquee_raw = nullptr; }
-            s_current_state = STATE_MENU;
-            draw_menu(s_menu_selection, s_menu_popup);
-        } else if (no && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "CANCEL");
-            s_marquee_exit_popup = false;
-            draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup);
-        } else {
-            draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup);
-        }
-        return;
+    if (btn == BTN_U || btn == BTN_D) {
+        s_marquee_paused = !s_marquee_paused;
+    } else if (btn == BTN_S) {
+        if (audio_is_running()) audio_stop(); else audio_start();
     }
 
-    if (btn == BTN_D) {
-        ESP_LOGI(TAG, "POPUP: exit Marquee?");
-        s_marquee_exit_popup = true;
-        s_marquee_exit_armed = true;
-        draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup);
-        return;
+    if (!s_marquee_paused) {
+        s_scroll_offset = (s_scroll_offset + 2) % 500;
     }
-
-    s_scroll_offset = (s_scroll_offset + 2) % 500;
-    draw_marquee_frame(s_marquee_raw, s_scroll_offset, s_marquee_exit_popup);
+    draw_marquee_frame(s_marquee_raw, s_scroll_offset);
 }
 
-// ==================== GIF 播放器 Handler ====================
+// ==================== GIF Handler ====================
 
-/**
- * @brief 处理 GIF 播放：LEFT/RIGHT 调速，自动推进帧，DOWN 退出（弹窗）
- */
 static void handle_gif(int btn)
 {
+    if (btn == BTN_B) {
+        s_gif_need_init = true;
+        audio_stop();
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
     if (s_gif_need_init) {
         LGFX_Sprite *bb = display_backbuffer();
         bb->fillScreen(COLOR_BLACK);
@@ -304,8 +250,6 @@ static void handle_gif(int btn)
         bb->pushSprite(display_tft(), 0, 0);
         display_tft()->endWrite();
 
-        ESP_LOGI(TAG, "INIT: GIF player (%d frames)", GIF_FRAME_COUNT);
-        s_gif_exit_popup = false;
         s_gif_frame_idx = 0;
         s_gif_speed = 18;
         s_gif_last_frame_time = esp_timer_get_time() / 1000;
@@ -313,50 +257,23 @@ static void handle_gif(int btn)
         s_gif_need_init = false;
 
         if (!audio_is_running()) audio_start();
-        draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup);
+        draw_gif_frame(s_gif_frame_idx, s_gif_speed);
         return;
     }
 
-    if (s_gif_exit_popup) {
-        bool yes = (gpio_get_level(BTN_DOWN) == 0);
-        bool no  = (gpio_get_level(BTN_UP) == 0);
-        if (!yes && !no) s_gif_exit_armed = false;
-        if (s_gif_exit_armed) { draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup); return; }
-
-        int64_t now = esp_timer_get_time() / 1000;
-        if (yes && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "EXIT: GIF -> MENU");
-            s_gif_exit_popup = false;
-            s_gif_need_init = true;
-            audio_stop();
-            free_gif_frames();
-            s_current_state = STATE_MENU;
-            draw_menu(s_menu_selection, s_menu_popup);
-        } else if (no && (now - s_last_action_time >= 200)) {
-            s_last_action_time = now;
-            ESP_LOGI(TAG, "CANCEL");
-            s_gif_exit_popup = false;
-            draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup);
-        } else {
-            draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup);
-        }
-        return;
-    }
-
+    bool redraw = false;
     switch (btn) {
-        case BTN_L:
-            if (s_gif_speed > 1)  { s_gif_speed--; draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup); }
+        case BTN_U: if (s_gif_speed < 20) { s_gif_speed++; redraw = true; } break;
+        case BTN_D: if (s_gif_speed > 1)  { s_gif_speed--; redraw = true; } break;
+        case BTN_S:
+            if (audio_is_running()) audio_stop(); else audio_start();
+            redraw = true;
             break;
-        case BTN_R:
-            if (s_gif_speed < 20) { s_gif_speed++; draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup); }
-            break;
-        case BTN_D:
-            ESP_LOGI(TAG, "POPUP: exit GIF?");
-            s_gif_exit_popup = true;
-            s_gif_exit_armed = true;
-            draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup);
-            return;
+        default: break;
+    }
+    if (redraw) {
+        draw_gif_frame(s_gif_frame_idx, s_gif_speed);
+        return;
     }
 
     int delay_ms = 500 - (s_gif_speed - 1) * 25;
@@ -364,8 +281,167 @@ static void handle_gif(int btn)
     if (now - s_gif_last_frame_time >= delay_ms) {
         s_gif_frame_idx = (s_gif_frame_idx + 1) % GIF_FRAME_COUNT;
         s_gif_last_frame_time = now;
-        draw_gif_frame(s_gif_frame_idx, s_gif_speed, s_gif_exit_popup);
+        draw_gif_frame(s_gif_frame_idx, s_gif_speed);
     }
+}
+
+// ==================== Ping Handler ====================
+
+static bool s_ping_started = false;
+
+static void handle_ping(int btn)
+{
+    if (btn == BTN_B) {
+        network_test_stop();
+        s_ping_started = false; s_net_prov_mode = false;
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
+    if (!wifi_is_connected()) {
+        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        draw_wifi_not_connected();
+        return;
+    }
+
+    switch (btn) {
+        case BTN_S:
+            if (network_test_running()) { network_test_stop(); vTaskDelay(pdMS_TO_TICKS(100)); }
+            s_ping_started = false; s_net_scroll = 0;
+            break;
+        case BTN_U: if (s_net_scroll > 0) s_net_scroll--; break;
+        case BTN_D: s_net_scroll++; break;
+        default: break;
+    }
+
+    if (!s_ping_started && !network_test_running()) {
+        ping_start(CONFIG_NETWORK_DEFAULT_HOST, 4, NULL);
+        s_ping_started = true;
+    }
+
+    draw_network_result("Ping Test", network_get_results(),
+                        s_net_scroll, 10, network_test_running());
+}
+
+// ==================== HTTP Handler ====================
+
+static bool s_http_started = false;
+
+static void handle_http(int btn)
+{
+    if (btn == BTN_B) {
+        network_test_stop();
+        s_http_started = false; s_net_prov_mode = false;
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
+    if (!wifi_is_connected()) {
+        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        draw_wifi_not_connected();
+        return;
+    }
+
+    switch (btn) {
+        case BTN_S:
+            if (network_test_running()) { network_test_stop(); vTaskDelay(pdMS_TO_TICKS(100)); }
+            s_http_started = false; s_net_scroll = 0;
+            break;
+        case BTN_U: if (s_net_scroll > 0) s_net_scroll--; break;
+        case BTN_D: s_net_scroll++; break;
+        default: break;
+    }
+
+    if (!s_http_started && !network_test_running()) {
+        http_get_start("http://baidu.com", NULL);
+        s_http_started = true;
+    }
+
+    draw_network_result("HTTP GET", network_get_results(),
+                        s_net_scroll, 10, network_test_running());
+}
+
+// ==================== TCP Handler ====================
+
+static bool s_tcp_started = false;
+
+static void handle_tcp(int btn)
+{
+    if (btn == BTN_B) {
+        network_test_stop();
+        s_tcp_started = false; s_net_prov_mode = false;
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
+    if (!wifi_is_connected()) {
+        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        draw_wifi_not_connected();
+        return;
+    }
+
+    switch (btn) {
+        case BTN_S:
+            if (network_test_running()) { network_test_stop(); vTaskDelay(pdMS_TO_TICKS(100)); }
+            s_tcp_started = false; s_net_scroll = 0;
+            break;
+        case BTN_U: if (s_net_scroll > 0) s_net_scroll--; break;
+        case BTN_D: s_net_scroll++; break;
+        default: break;
+    }
+
+    if (!s_tcp_started && !network_test_running()) {
+        tcp_client_start(CONFIG_NETWORK_DEFAULT_HOST, 80, NULL, NULL);
+        s_tcp_started = true;
+    }
+
+    draw_network_result("TCP Client", network_get_results(),
+                        s_net_scroll, 10, network_test_running());
+}
+
+// ==================== WiFi 状态 Handler ====================
+
+static void handle_wifi_status(int btn)
+{
+    if (btn == BTN_B) {
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
+    wifi_status_t st;
+    wifi_get_status(&st);
+    draw_wifi_status_big(st.ssid, st.ip, st.rssi, st.mac);
+}
+
+// ==================== WiFi Config Handler ====================
+
+static bool s_wifi_cfg_ap_active = false;
+
+static void handle_wifi_config(int btn)
+{
+    if (btn == BTN_B) {
+        if (s_wifi_cfg_ap_active) {
+            wifi_prov_web_stop();
+            s_wifi_cfg_ap_active = false;
+        }
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+
+    if (btn == BTN_S && !s_wifi_cfg_ap_active) {
+        wifi_prov_web_start();
+        s_wifi_cfg_ap_active = true;
+    }
+
+    wifi_status_t st;
+    wifi_get_status(&st);
+    draw_wifi_config_page(s_wifi_cfg_ap_active, wifi_is_connected(),
+                          st.ip[0] ? st.ip : NULL);
 }
 
 // ==================== 主入口 ====================
@@ -374,31 +450,60 @@ extern "C" void app_main()
 {
     ESP_LOGI(TAG, "===== box-demo Starting =====");
 
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
     display_init();
+    draw_boot_screen();       // ← 立即显示启动画面
     audio_init();
     buttons_init();
     storage_init();
+    wifi_init();              // 非阻塞，后台连接
 
-    draw_menu(s_menu_selection, s_menu_popup);
+    draw_menu(s_menu_sel, s_menu_scroll);
 
     while (1) {
         int btn = read_buttons();
 
         switch (s_current_state) {
             case STATE_MENU:
+                handle_menu(btn);
+                vTaskDelay(pdMS_TO_TICKS(15));
+                break;
             case STATE_IMG:
-                if (s_current_state == STATE_MENU) handle_menu(btn);
-                else handle_img(btn);
+                handle_img(btn);
                 vTaskDelay(pdMS_TO_TICKS(10));
                 break;
-
             case STATE_MARQUEE:
                 handle_marquee(btn);
                 vTaskDelay(pdMS_TO_TICKS(30));
                 break;
-
             case STATE_GIF:
                 handle_gif(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_PING:
+                handle_ping(btn);
+                vTaskDelay(pdMS_TO_TICKS(20));
+                break;
+            case STATE_HTTP:
+                handle_http(btn);
+                vTaskDelay(pdMS_TO_TICKS(20));
+                break;
+            case STATE_TCP:
+                handle_tcp(btn);
+                vTaskDelay(pdMS_TO_TICKS(20));
+                break;
+            case STATE_WIFI_STATUS:
+                handle_wifi_status(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_WIFI_CONFIG:
+                handle_wifi_config(btn);
                 vTaskDelay(pdMS_TO_TICKS(10));
                 break;
         }

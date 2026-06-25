@@ -9,4 +9,5 @@ idf_component_register(
         display
         storage
         audio
+        net_test
 )
