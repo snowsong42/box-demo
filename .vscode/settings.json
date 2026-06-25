@@ -1,9 +1,16 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.ignoreCMakeListsChanges": true,
+  "cmake.useCMakePresets": "never",
   "idf.extensionActivationMode": "always",
-  "idf.espIdfPath": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf",
-  "idf.toolsPath": "C:\\Espressif\\tools",
-  "idf.pythonInstallPath": "C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts\\python.exe",
-  "idf.flashType": "UART"
+  "idf.gitPathWin": "D:\\coding\\Git\\cmd\\git.exe",
+  "idf.flashType": "UART",
+  "idf.customExtraVars": {},
+  "idf.customExtraPaths": [
+    "C:\\Espressif\\tools\\xtensa-esp-elf\\esp-15.2.0_20251204\\xtensa-esp-elf\\bin",
+    "C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts"
+  ],
+  "idf.currentSetup": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf"
 }

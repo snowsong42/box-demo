@@ -12,7 +12,7 @@
     {
       "label": "ESP-IDF: Build",
       "type": "shell",
-      "command": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build",
+      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -32,27 +32,27 @@
     {
       "label": "ESP-IDF: Clean",
       "type": "shell",
-      "command": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py fullclean",
+      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py fullclean",
       "group": "build"
     },
     {
       "label": "ESP-IDF: Flash",
       "type": "shell",
-      "command": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py flash",
+      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py flash",
       "group": "none",
       "dependsOn": ["ESP-IDF: Build"]
     },
     {
       "label": "ESP-IDF: Monitor",
       "type": "shell",
-      "command": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py monitor",
+      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py monitor",
       "group": "none",
       "isBackground": false
     },
     {
       "label": "ESP-IDF: Build, Flash & Monitor",
       "type": "shell",
-      "command": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build flash monitor",
+      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build flash monitor",
       "group": "none",
       "isBackground": false
     }
