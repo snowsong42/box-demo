@@ -87,18 +87,24 @@ box-demo/
 │   ├── gif_0001~0028.png   # GIF 动画帧 (28 帧 200×200)
 │   ├── 500x150.raw         # 走马灯图片 (RGB565)
 │   └── music.wav           # 背景音乐 (22050Hz 16-bit Mono)
-├── docs/                   # 📚 详细文档 (9 篇)
-│   ├── esp32-s3-board.md   # 开发板完整规格
-│   ├── hardware-wiring.md  # 接线详解 + GPIO 矩阵分析
-│   ├── tft-lcd-specs.md    # TFT 完整规格 + ST7789 寄存器
-│   ├── diji-nes-reference.md # DIJI-NES 参考分析
-│   ├── audio-subsystem.md  # 音频子系统 (I2S + MAX98357A)
-│   ├── button-system.md    # 按键交互系统 (边缘检测)
-│   ├── app-architecture.md # 应用架构 (状态机 + 生命周期)
-│   ├── build-config.md     # 构建与配置指南
-│   ├── lovyangfx-sprite-image-guide.md # 开发踩坑记录
-│   ├── anti-flicker-backbuffer-guide.md # 抗闪烁: 全帧缓冲方案演进
-│   └── cloud-asr-plan.md   # 未来规划: WiFi 云端语音识别
+├── docs/                   # 📚 详细文档 (13 篇)
+│   ├── 文档索引.md          # 文档索引入口
+│   ├── DIJI-NES参考分析.md  # DIJI-NES 参考分析
+│   ├── hardware/
+│   │   ├── 开发板规格.md        # 开发板完整规格
+│   │   └── 显示屏规格.md        # TFT 规格 + 接线
+│   ├── architecture/
+│   │   ├── 应用架构.md          # 应用架构 (状态机 + 生命周期)
+│   │   ├── 按键系统.md          # 按键交互系统
+│   │   └── 构建配置.md          # 构建与配置指南
+│   ├── guides/
+│   │   ├── 抗闪烁方案.md        # 抗闪烁方案
+│   │   ├── 音频子系统.md        # 音频子系统
+│   │   └── 图片加载指南.md      # 图片加载指南
+│   ├── future/
+│   │   ├── 云端语音识别方案.md  # WiFi 云端语音识别
+│   │   └── 麦克风接入方案.md    # I2S 麦克风方案
+│   └── reference/              # 厂商资料 + 参考源码
 └── CMakeLists.txt          # 顶层项目文件 (SPIFFS 镜像生成)
 ```
 

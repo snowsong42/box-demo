@@ -12,5 +12,6 @@
     "C:\\Espressif\\tools\\xtensa-esp-elf\\esp-15.2.0_20251204\\xtensa-esp-elf\\bin",
     "C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts"
   ],
-  "idf.currentSetup": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf"
+  "idf.currentSetup": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf",
+  "idf.portWin": "COM8"
 }
