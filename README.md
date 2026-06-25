@@ -16,14 +16,16 @@
 | ---------- | ----------------------------------------- | ---- |
 | 开发板     | HW-678ABCD (ESP32-S3-WROOM-1-N16R8)       | 1    |
 | TFT 彩色屏 | 可爱橙 KAC-N200-2432KHWIG20-A8 (ST7789V2) | 1    |
-| 音频 DAC   | MAX98357A I2S 功放模块 + 喇叭              | 1    |
-| 按键       | 轻触开关 (UP/DOWN/LEFT/RIGHT)              | 4    |
-| 连接线     | 杜邦线 (母-母)                             | 若干 |
+| 音频 DAC   | MAX98357A I2S 功放模块 + 喇叭             | 1    |
+| 按键       | 轻触开关 (UP/DOWN/LEFT/RIGHT)             | 4    |
+| 连接线     | 杜邦线 (母-母)                            | 若干 |
 | USB 数据线 | Type-C                                    | 1    |
 
 ---
 
 ## 🔌 接线说明
+
+### 视频接线（TFT）
 
 | ESP32-S3 (HW-678) | TFT (8-Pin SPI) | 信号      | 功能              |
 | ----------------- | --------------- | --------- | ----------------- |
@@ -38,23 +40,6 @@
 
 > ⚠️ **背光直接接 3.3V 即常亮**，如需调光可将 BLK 接 GPIO 通过 PWM 控制。
 
-### 按键接线
-
-| ESP32-S3 GPIO | 按键 | 模式 | 说明 |
-|:---:|:---:|------|------|
-| GPIO17 | UP    | INPUT_PULLUP | 按下 = GND |
-| GPIO3  | DOWN  | INPUT_PULLUP | ⚠️ Strapping 引脚 (JTAG)，运行时可用 |
-| GPIO8  | LEFT  | INPUT_PULLUP | 按下 = GND |
-| GPIO18 | RIGHT | INPUT_PULLUP | 按下 = GND |
-
-### 音频接线
-
-| ESP32-S3 GPIO | MAX98357A 引脚 | 信号 | 说明 |
-|:---:|------|------|------|
-| GPIO5  | BCLK | I2S 位时钟 | |
-| GPIO4  | LRCLK | I2S 声道时钟 | |
-| GPIO6  | DIN | I2S 音频数据 | |
-
 ```
 ESP32-S3 (HW-678)              TFT-LCD (8-Pin)
 ┌──────────────┐              ┌────────────────┐
@@ -68,6 +53,24 @@ ESP32-S3 (HW-678)              TFT-LCD (8-Pin)
 │         3.3V ├──────────────┤ BLK (Pin 8)    │
 └──────────────┘              └────────────────┘
 ```
+
+### 按键接线（按键）
+
+| ESP32-S3 GPIO | 按键 | 模式         | 说明                                   |
+| :-----------: | :---: | ------------ | -------------------------------------- |
+|    GPIO17    |  UP  | INPUT_PULLUP | 按下 = GND                             |
+|     GPIO3     | DOWN | INPUT_PULLUP | ⚠️ Strapping 引脚 (JTAG)，运行时可用 |
+|     GPIO8     | LEFT | INPUT_PULLUP | 按下 = GND                             |
+|    GPIO18    | RIGHT | INPUT_PULLUP | 按下 = GND                             |
+
+### 音频接线（MAX98357A）
+
+| ESP32-S3 GPIO | MAX98357A 引脚 | 信号         | 说明 |
+| :-----------: | -------------- | ------------ | ---- |
+|     GPIO5     | BCLK           | I2S 位时钟   |      |
+|     GPIO4     | LRCLK          | I2S 声道时钟 |      |
+|     GPIO6     | DIN            | I2S 音频数据 |      |
+
 
 ---
 
@@ -110,16 +113,16 @@ box-demo/
 
 ### 技术栈
 
-| 层级     | 技术选择                           |
-| -------- | ---------------------------------- |
+| 层级     | 技术选择                                                       |
+| -------- | -------------------------------------------------------------- |
 | 芯片     | ESP32-S3-N16R8 (Xtensa LX7 双核 240MHz, 16MB Flash, 8MB PSRAM) |
-| RTOS     | FreeRTOS (ESP-IDF 内置)            |
-| 构建系统 | ESP-IDF v6.0.1 + CMake             |
-| 图形库   | **LovyanGFX** (本地组件克隆)        |
-| 显示屏   | ST7789V2, 240×320, SPI3_HOST, DMA, RGB565 |
-| 音频     | I2S0 标准模式 TX → MAX98357A (22050Hz 16-bit Mono) |
-| 存储     | SPIFFS (4MB 分区，存放图片/音频资源) |
-| 语言     | C++17 (`.cpp`)                     |
+| RTOS     | FreeRTOS (ESP-IDF 内置)                                        |
+| 构建系统 | ESP-IDF v6.0.1 + CMake                                         |
+| 图形库   | **LovyanGFX** (本地组件克隆)                             |
+| 显示屏   | ST7789V2, 240×320, SPI3_HOST, DMA, RGB565                     |
+| 音频     | I2S0 标准模式 TX → MAX98357A (22050Hz 16-bit Mono)            |
+| 存储     | SPIFFS (4MB 分区，存放图片/音频资源)                           |
+| 语言     | C++17 (`.cpp`)                                               |
 
 ---
 
@@ -166,11 +169,11 @@ idf.py build flash -p COM7
 
 ### 按键操作
 
-| 按键 | 菜单 | 子功能内 |
-|:---:|------|------|
-| **UP** | 上移选择 | 取消退出 (弹窗中) |
-| **DOWN** | 下移选择 | 弹出退出确认窗 |
-| **LEFT** | — | 上一张 / 减速 (GIF) |
+|      按键      | 菜单     | 子功能内            |
+| :-------------: | -------- | ------------------- |
+|  **UP**  | 上移选择 | 取消退出 (弹窗中)   |
+| **DOWN** | 下移选择 | 弹出退出确认窗      |
+| **LEFT** | —       | 上一张 / 减速 (GIF) |
 | **RIGHT** | 确认进入 | 下一张 / 加速 (GIF) |
 
 ### 功能一：图片浏览器 (IMG Browser)
@@ -203,29 +206,29 @@ idf.py build flash -p COM7
 
 ### 硬件
 
-| 文档 | 内容 |
-|------|------|
-| [docs/esp32-s3-board.md](docs/esp32-s3-board.md) | HW-678 开发板完整规格、41 Pin 引脚表、Strapping 警告 |
-| [docs/hardware-wiring.md](docs/hardware-wiring.md) | TFT 接线图、GPIO 矩阵分析、SPI3_HOST 方案详解 |
-| [docs/tft-lcd-specs.md](docs/tft-lcd-specs.md) | ST7789V2 完整参数、电学/光学特性、初始化序列 |
+| 文档                                            | 内容                                                 |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| [docs/esp32-s3-board.md](docs/esp32-s3-board.md)   | HW-678 开发板完整规格、41 Pin 引脚表、Strapping 警告 |
+| [docs/hardware-wiring.md](docs/hardware-wiring.md) | TFT 接线图、GPIO 矩阵分析、SPI3_HOST 方案详解        |
+| [docs/tft-lcd-specs.md](docs/tft-lcd-specs.md)     | ST7789V2 完整参数、电学/光学特性、初始化序列         |
 
 ### 软件
 
-| 文档 | 内容 |
-|------|------|
-| [docs/app-architecture.md](docs/app-architecture.md) | 三级状态机、退出弹窗、音频生命周期、内存策略 |
-| [docs/audio-subsystem.md](docs/audio-subsystem.md) | I2S 配置、MAX98357A、WAV 播放任务 |
-| [docs/button-system.md](docs/button-system.md) | 4 键接线、边缘检测状态机、盲区补偿 |
-| [docs/build-config.md](docs/build-config.md) | sdkconfig 关键项、分区表、SPIFFS 资源管理、编译烧录 |
+| 文档                                              | 内容                                                |
+| ------------------------------------------------- | --------------------------------------------------- |
+| [docs/app-architecture.md](docs/app-architecture.md) | 三级状态机、退出弹窗、音频生命周期、内存策略        |
+| [docs/audio-subsystem.md](docs/audio-subsystem.md)   | I2S 配置、MAX98357A、WAV 播放任务                   |
+| [docs/button-system.md](docs/button-system.md)       | 4 键接线、边缘检测状态机、盲区补偿                  |
+| [docs/build-config.md](docs/build-config.md)         | sdkconfig 关键项、分区表、SPIFFS 资源管理、编译烧录 |
 
 ### 参考
 
-| 文档 | 内容 |
-|------|------|
-| [docs/diji-nes-reference.md](docs/diji-nes-reference.md) | DIJI-NES 原型完整分析、硬件对比、可复用方案 |
-| [docs/lovyangfx-sprite-image-guide.md](docs/lovyangfx-sprite-image-guide.md) | 开发踩坑记录：SPIFFS 兼容、PSRAM、按键防抖 |
+| 文档                                                                        | 内容                                            |
+| --------------------------------------------------------------------------- | ----------------------------------------------- |
+| [docs/diji-nes-reference.md](docs/diji-nes-reference.md)                       | DIJI-NES 原型完整分析、硬件对比、可复用方案     |
+| [docs/lovyangfx-sprite-image-guide.md](docs/lovyangfx-sprite-image-guide.md)   | 开发踩坑记录：SPIFFS 兼容、PSRAM、按键防抖      |
 | [docs/anti-flicker-backbuffer-guide.md](docs/anti-flicker-backbuffer-guide.md) | 抗闪烁演进：从 fillRect→Sprite→0x28→全帧缓冲 |
-| [docs/cloud-asr-plan.md](docs/cloud-asr-plan.md) | 🚧 未来规划：WiFi 云端语音识别方案 |
+| [docs/cloud-asr-plan.md](docs/cloud-asr-plan.md)                               | 🚧 未来规划：WiFi 云端语音识别方案              |
 
 ---
 
