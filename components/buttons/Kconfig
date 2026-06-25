@@ -1,0 +1,8 @@
+menu "Buttons Configuration"
+    config BUTTONS_DEBOUNCE_MS
+        int "Debounce time (ms)"
+        default 0
+        range 0 50
+        help
+            Button debounce delay. Set to 0 to use edge detection only.
+endmenu

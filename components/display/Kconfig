@@ -1,0 +1,7 @@
+menu "Display Configuration"
+    config DISPLAY_BACKBUFFER_PSRAM
+        bool "Use PSRAM for backbuffer"
+        default y
+        help
+            Allocate the 320x240 backbuffer in PSRAM. Required for memory-intensive features.
+endmenu

@@ -1,3 +1,14 @@
+/*
+ * SPDX-FileCopyrightText: 2025 box-demo
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file lgfx_conf.h
+ * @brief LovyanGFX 硬件配置：ST7789 + SPI3_HOST + DMA
+ */
+
 #pragma once
 #include <LovyanGFX.hpp>
 

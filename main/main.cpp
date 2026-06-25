@@ -26,7 +26,7 @@
 #include "storage.h"
 #include "audio.h"
 
-static const char *TAG = "box-demo";
+static const char *TAG = "main";
 
 // ==================== 状态枚举 ====================
 enum AppState {
@@ -77,6 +77,9 @@ static void handle_gif(int btn);
 
 // ==================== 主菜单 Handler ====================
 
+/**
+ * @brief 处理主菜单按键：UP/DOWN 选择，RIGHT 确认（弹窗），LEFT 取消
+ */
 static void handle_menu(int btn)
 {
     if (s_menu_popup) {
@@ -125,6 +128,9 @@ static void handle_menu(int btn)
 
 // ==================== 图片浏览器 Handler ====================
 
+/**
+ * @brief 处理图片浏览器按键：LEFT/RIGHT 翻页，DOWN 退出（弹窗）
+ */
 static void handle_img(int btn)
 {
     if (s_img_need_init) {
@@ -203,6 +209,9 @@ static void handle_img(int btn)
 
 // ==================== 走马灯 Handler ====================
 
+/**
+ * @brief 处理走马灯：自动滚动推进，DOWN 退出（弹窗）
+ */
 static void handle_marquee(int btn)
 {
     if (s_marquee_need_init) {
@@ -280,6 +289,9 @@ static void handle_marquee(int btn)
 
 // ==================== GIF 播放器 Handler ====================
 
+/**
+ * @brief 处理 GIF 播放：LEFT/RIGHT 调速，自动推进帧，DOWN 退出（弹窗）
+ */
 static void handle_gif(int btn)
 {
     if (s_gif_need_init) {

@@ -1,0 +1,7 @@
+menu "Storage Configuration"
+    config STORAGE_SPIFFS_PARTITION
+        string "SPIFFS partition label"
+        default "storage"
+        help
+            Partition label for SPIFFS mount point.
+endmenu

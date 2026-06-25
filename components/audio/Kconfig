@@ -1,0 +1,8 @@
+menu "Audio Configuration"
+    config AUDIO_I2S_NUM
+        int "I2S port number"
+        default 0
+        range 0 1
+        help
+            I2S peripheral to use for audio output.
+endmenu
