@@ -8,47 +8,49 @@
 
 ### 1.1 I2S 外设
 
-| 资源 | 占用情况 | 能力 |
-|------|---------|------|
+| 资源           | 占用情况             | 能力                                            |
+| -------------- | -------------------- | ----------------------------------------------- |
 | **I2S0** | TX 已用（GPIO5/4/6） | ESP32-S3 支持**全双工**，TX+RX 可同时工作 |
-| I2S1 | 空闲 | 备选方案（如需独立时钟域） |
+| I2S1           | 空闲                 | 备选方案（如需独立时钟域）                      |
 
 当前配置：
+
 ```cpp
 i2s_new_channel(&chan_cfg, &tx_chan, NULL);  // 仅 TX
 ```
 
 改为全双工：
+
 ```cpp
 i2s_new_channel(&chan_cfg, &tx_chan, &rx_chan);  // TX + RX
 ```
 
 ### 1.2 GPIO 占用一览
 
-| GPIO | 用途 | 状态 |
-|------|------|------|
-| 10 | TFT CS | 占用 |
-| 11 | TFT DC | 占用 |
-| 12 | TFT RES | 占用 |
-| 13 | TFT SDA (MOSI) | 占用 |
-| 14 | TFT SCL (SCLK) | 占用 |
-| 17 | BTN_UP | 占用 |
-| 3 | BTN_DOWN | 占用 |
-| 8 | BTN_LEFT | 占用 |
-| 18 | BTN_RIGHT | 占用 |
-| 5 | I2S0 BCLK | 占用 |
-| 4 | I2S0 WS | 占用 |
-| 6 | I2S0 DOUT | 占用 |
-| 48 | WS2812 LED | 占用（板载） |
+| GPIO        | 用途                 | 状态              |
+| ----------- | -------------------- | ----------------- |
+| 10          | TFT CS               | 占用              |
+| 11          | TFT DC               | 占用              |
+| 12          | TFT RES              | 占用              |
+| 13          | TFT SDA (MOSI)       | 占用              |
+| 14          | TFT SCL (SCLK)       | 占用              |
+| 17          | BTN_UP               | 占用              |
+| 3           | BTN_DOWN             | 占用              |
+| 8           | BTN_LEFT             | 占用              |
+| 18          | BTN_RIGHT            | 占用              |
+| 5           | I2S0 BCLK            | 占用              |
+| 4           | I2S0 WS              | 占用              |
+| 6           | I2S0 DOUT            | 占用              |
+| 48          | WS2812 LED           | 占用（板载）      |
 | **1** | **麦克风 DIN** | **← 选定** |
-| 35/36/37 | Octal PSRAM | 不可用 (N16R8) |
+| 35/36/37    | Octal PSRAM          | 不可用 (N16R8)    |
 
 ### 1.3 内存
 
-| 板型 | PSRAM | 当前峰值 | 麦克风开销 | 结论 |
-|------|-------|---------|-----------|------|
-| N16R8 | 8 MB | ~2.5 MB | DMA buffer: ~4 KB | ✅ 充足 |
-| N8R2 | 2 MB | GIF 已超限 | — | ⚠️ 紧张 |
+| 板型  | PSRAM | 当前峰值   | 麦克风开销        | 结论      |
+| ----- | ----- | ---------- | ----------------- | --------- |
+| N16R8 | 8 MB  | ~2.5 MB    | DMA buffer: ~4 KB | ✅ 充足   |
+| N8R2  | 2 MB  | GIF 已超限 | —                | ⚠️ 紧张 |
 
 ---
 
@@ -74,11 +76,11 @@ ESP32-S3                    I2S MEMS 麦克风 (INMP441)
 
 ### 兼容的麦克风模块
 
-| 型号 | 接口 | 位深 | 采样率 | 备注 |
-|------|------|------|--------|------|
-| **INMP441** | I2S Standard | 24-bit | 8k~44.1k | 最常见、便宜（~5元） |
-| ICS-43434 | I2S Standard | 24-bit | 8k~96k | 低噪声 |
-| SPH0645LM4H | I2S Standard | 24-bit | 32k~64k | 注意：需特殊 L/R 配置 |
+| 型号              | 接口         | 位深   | 采样率   | 备注                  |
+| ----------------- | ------------ | ------ | -------- | --------------------- |
+| **INMP441** | I2S Standard | 24-bit | 8k~44.1k | 最常见、便宜（~5元）  |
+| ICS-43434         | I2S Standard | 24-bit | 8k~96k   | 低噪声                |
+| SPH0645LM4H       | I2S Standard | 24-bit | 32k~64k  | 注意：需特殊 L/R 配置 |
 
 ---
 
@@ -150,14 +152,14 @@ static void mic_capture_task(void* arg) {
 
 ## 4. 实施步骤
 
-| 步骤 | 内容 | 预计 |
-|------|------|------|
-| 1 | 硬件接线：MIC DIN→GPIO1, VDD→3.3V, GND→GND, L/R→GND, BCLK/WS 并联到 GPIO5/4 | 5 min |
-| 2 | 改 `i2s_new_channel` 加 `rx_chan`；`.din = GPIO_NUM_1` | 1 min |
-| 3 | `i2s_channel_init_std_mode(rx_chan, ...)` 初始化 RX 通道 | 1 min |
-| 4 | 各 handler 的 enable/disable 补上 `rx_chan` | 5 min |
-| 5 | 创建 `mic_capture_task` 验证数据采集（dump 音量到日志） | 10 min |
-| 6 | 编写具体应用逻辑（ASR、音量触发等） | 视需求 |
+| 步骤 | 内容                                                                            | 预计   |
+| ---- | ------------------------------------------------------------------------------- | ------ |
+| 1    | 硬件接线：MIC DIN→GPIO1, VDD→3.3V, GND→GND, L/R→GND, BCLK/WS 并联到 GPIO5/4 | 5 min  |
+| 2    | 改`i2s_new_channel` 加 `rx_chan`；`.din = GPIO_NUM_1`                     | 1 min  |
+| 3    | `i2s_channel_init_std_mode(rx_chan, ...)` 初始化 RX 通道                      | 1 min  |
+| 4    | 各 handler 的 enable/disable 补上`rx_chan`                                    | 5 min  |
+| 5    | 创建`mic_capture_task` 验证数据采集（dump 音量到日志）                        | 10 min |
+| 6    | 编写具体应用逻辑（ASR、音量触发等）                                             | 视需求 |
 
 ---
 
