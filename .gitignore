@@ -71,12 +71,18 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# docs: only track markdown files, ignore PDFs/subdirectories
-docs/*
-!docs/*.md
-
 # User-specific configuration files
 *.user
 *.workspace # General workspace files, can be from various tools
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
+
+# IDE
+.idea/
+
+# 编译中间产物
+*.d
+
+# 环境变量
+.env
+.env.local

@@ -5,6 +5,13 @@
       "shell": {
         "executable": "cmd.exe",
         "args": ["/d", "/c"]
+      },
+      "env": {
+        "IDF_PATH": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf",
+        "IDF_TOOLS_PATH": "C:\\Users\\snowsong\\.espressif\\tools",
+        "IDF_PYTHON_ENV_PATH": "C:\\Espressif\\tools\\python\\v6.0.1\\venv",
+        "ESP_IDF_VERSION": "6.0.1",
+        "PATH": "C:\\Users\\snowsong\\.espressif\\tools\\cmake\\4.0.3\\bin;C:\\Users\\snowsong\\.espressif\\tools\\ninja\\1.12.1;C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts;C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3;${env:PATH}"
       }
     }
   },
@@ -12,7 +19,7 @@
     {
       "label": "ESP-IDF: Build",
       "type": "shell",
-      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build",
+      "command": "C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3\\idf.py.exe build",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -32,27 +39,27 @@
     {
       "label": "ESP-IDF: Clean",
       "type": "shell",
-      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py fullclean",
+      "command": "C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3\\idf.py.exe fullclean",
       "group": "build"
     },
     {
       "label": "ESP-IDF: Flash",
       "type": "shell",
-      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py flash",
+      "command": "C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3\\idf.py.exe flash",
       "group": "none",
       "dependsOn": ["ESP-IDF: Build"]
     },
     {
       "label": "ESP-IDF: Monitor",
       "type": "shell",
-      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py monitor",
+      "command": "C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3\\idf.py.exe monitor",
       "group": "none",
       "isBackground": false
     },
     {
       "label": "ESP-IDF: Build, Flash & Monitor",
       "type": "shell",
-      "command": "call D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf\\export.bat && idf.py build flash monitor",
+      "command": "C:\\Users\\snowsong\\.espressif\\tools\\idf-exe\\1.0.3\\idf.py.exe build flash monitor",
       "group": "none",
       "isBackground": false
     }

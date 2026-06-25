@@ -1,0 +1,26 @@
+BasedOnStyle: Google
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+PointerAlignment: Right
+SortIncludes: true
+IncludeCategories:
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^"freertos/.*"'
+    Priority: 2
+  - Regex: '^"esp_.*"'
+    Priority: 3
+  - Regex: '^"driver/.*"'
+    Priority: 4
+  - Regex: '^".*"'
+    Priority: 5
