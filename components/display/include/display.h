@@ -175,6 +175,21 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
  */
 void draw_wifi_config_page(bool ap_active, bool connected, const char *ip);
 
+// ==================== 录音播放 UI ====================
+
+/** @brief 绘制录音播放主界面（LEFT 录音 / RIGHT 播放 / BACK 返回） */
+void draw_record_main(void);
+
+/** @brief 绘制录音界面
+ *  @param recording 是否正在录音
+ *  @param time_left 剩余秒数（0=完毕） */
+void draw_record_capture(bool recording, int time_left);
+
+/** @brief 绘制播放界面
+ *  @param playing 是否正在播放
+ *  @param finished 是否播放完毕 */
+void draw_record_playback(bool playing, bool finished);
+
 #ifdef __cplusplus
 }
 #endif

@@ -35,6 +35,9 @@ enum AppState {
     STATE_IMG,
     STATE_MARQUEE,
     STATE_GIF,
+    STATE_RECORD,
+    STATE_RECORD_CAPTURE,
+    STATE_RECORD_PLAYBACK,
     STATE_PING,
     STATE_HTTP,
     STATE_TCP,
@@ -44,7 +47,7 @@ enum AppState {
 static AppState s_current_state = STATE_MENU;
 
 // ==================== 菜单状态 ====================
-#define MENU_ITEMS 8
+#define MENU_ITEMS 9
 #define MENU_VISIBLE 5          // 可见行数
 static int s_menu_sel = 0;      // 当前选中项 (0..6)
 static int s_menu_scroll = 0;   // 滚动偏移（顶部显示的项索引）
@@ -68,6 +71,13 @@ static int s_gif_speed = 18;
 static int s_gif_frame_idx = 0;
 static int64_t s_gif_last_frame_time = 0;
 
+// ==================== 录音播放状态 ====================
+static bool s_record_need_init = true;
+static bool s_record_capturing = false;
+static bool s_record_playing = false;
+static bool s_record_play_done = false;
+static int  s_record_time_left = 15;
+
 // ==================== 网络测试共用状态 ====================
 static bool s_net_prov_mode = false;
 static int s_net_scroll = 0;
@@ -80,6 +90,9 @@ static void handle_gif(int btn);
 static void handle_ping(int btn);
 static void handle_http(int btn);
 static void handle_tcp(int btn);
+static void handle_record(int btn);
+static void handle_record_capture(int btn);
+static void handle_record_playback(int btn);
 static void handle_wifi_status(int btn);
 static void handle_wifi_config(int btn);
 
@@ -110,11 +123,12 @@ static void handle_menu(int btn)
                 case 0: s_current_state = STATE_IMG;    break;
                 case 1: s_current_state = STATE_MARQUEE; break;
                 case 2: s_current_state = STATE_GIF;     break;
-                case 3: s_current_state = STATE_PING;    break;
-                case 4: s_current_state = STATE_HTTP;    break;
-                case 5: s_current_state = STATE_TCP;     break;
-                case 6: s_current_state = STATE_WIFI_STATUS; break;
-                case 7: s_current_state = STATE_WIFI_CONFIG; break;
+                case 3: s_current_state = STATE_RECORD;  break;
+                case 4: s_current_state = STATE_PING;    break;
+                case 5: s_current_state = STATE_HTTP;    break;
+                case 6: s_current_state = STATE_TCP;     break;
+                case 7: s_current_state = STATE_WIFI_STATUS; break;
+                case 8: s_current_state = STATE_WIFI_CONFIG; break;
             }
             return;
         default: break;
@@ -405,6 +419,213 @@ static void handle_tcp(int btn)
                         s_net_scroll, 7, network_test_running());
 }
 
+// ==================== 录音播放 Handler ====================
+
+static void handle_record(int btn)
+{
+    if (btn == BTN_B) {
+        s_record_need_init = true;
+        audio_stop();
+        s_current_state = STATE_MENU;
+        draw_menu(s_menu_sel, s_menu_scroll);
+        return;
+    }
+    if (btn == BTN_L) {
+        s_record_need_init = true;
+        s_record_capturing = false;
+        s_record_time_left = 15;
+        s_current_state = STATE_RECORD_CAPTURE;
+        return;
+    }
+    if (btn == BTN_R) {
+        s_record_need_init = true;
+        s_record_playing = false;
+        s_record_play_done = false;
+        s_current_state = STATE_RECORD_PLAYBACK;
+        return;
+    }
+    draw_record_main();
+}
+
+static void handle_record_capture(int btn)
+{
+    // 首次进入
+    if (s_record_need_init) {
+        s_record_need_init = false;
+        s_record_capturing = false;
+        s_record_time_left = 15;
+        // 确保 recording.wav 存在
+        FILE *f = fopen("/spiffs/recording.wav", "rb");
+        if (!f) {
+            FILE *src = fopen("/spiffs/music.wav", "rb");
+            if (src) {
+                f = fopen("/spiffs/recording.wav", "wb");
+                if (f) {
+                    uint8_t buf[1024];
+                    size_t rd;
+                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
+                        fwrite(buf, 1, rd, f);
+                    fclose(f);
+                }
+                fclose(src);
+            }
+        } else {
+            fclose(f);
+        }
+        draw_record_capture(false, 15);
+        return;
+    }
+
+    // BACK 且不在录音 → 回主界面
+    if (btn == BTN_B && !s_record_capturing) {
+        s_current_state = STATE_RECORD;
+        draw_record_main();
+        return;
+    }
+
+    // BACK 且在录音中 → 停止录音
+    if (btn == BTN_B && s_record_capturing) {
+        audio_record_stop();
+        s_record_capturing = false;
+        s_record_time_left = 0;
+        draw_record_capture(false, 0);
+        return;
+    }
+
+    // START 且不在录音 → 开始录音
+    if (btn == BTN_S && !s_record_capturing) {
+        // 确保 recording.wav 存在
+        FILE *f = fopen("/spiffs/recording.wav", "rb");
+        if (!f) {
+            FILE *src = fopen("/spiffs/music.wav", "rb");
+            if (src) {
+                f = fopen("/spiffs/recording.wav", "wb");
+                if (f) {
+                    uint8_t buf[1024];
+                    size_t rd;
+                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
+                        fwrite(buf, 1, rd, f);
+                    fclose(f);
+                }
+                fclose(src);
+            }
+        } else {
+            fclose(f);
+        }
+        if (audio_record_start("/spiffs/recording.wav", 15)) {
+            s_record_capturing = true;
+            s_record_time_left = 15;
+            draw_record_capture(true, 15);
+        }
+        return;
+    }
+
+    // 录音中 → 检测自然结束
+    if (s_record_capturing) {
+        if (!audio_is_recording()) {
+            s_record_capturing = false;
+            s_record_time_left = 0;
+        } else {
+            int elapsed = audio_record_time_elapsed();
+            int left = 15 - elapsed;
+            if (left < 0) left = 0;
+            s_record_time_left = left;
+        }
+        draw_record_capture(s_record_capturing, s_record_time_left);
+        return;
+    }
+
+    // 完毕态 → START 重新录音
+    if (btn == BTN_S) {
+        if (audio_record_start("/spiffs/recording.wav", 15)) {
+            s_record_capturing = true;
+            s_record_time_left = 15;
+            draw_record_capture(true, 15);
+        }
+        return;
+    }
+
+    draw_record_capture(false, s_record_time_left);
+}
+
+static void handle_record_playback(int btn)
+{
+    // 首次进入
+    if (s_record_need_init) {
+        s_record_need_init = false;
+        s_record_playing = false;
+        s_record_play_done = false;
+        // 确保 recording.wav 存在
+        FILE *f = fopen("/spiffs/recording.wav", "rb");
+        if (!f) {
+            FILE *src = fopen("/spiffs/music.wav", "rb");
+            if (src) {
+                f = fopen("/spiffs/recording.wav", "wb");
+                if (f) {
+                    uint8_t buf[1024];
+                    size_t rd;
+                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
+                        fwrite(buf, 1, rd, f);
+                    fclose(f);
+                }
+                fclose(src);
+            }
+        } else {
+            fclose(f);
+        }
+        draw_record_playback(false, false);
+        return;
+    }
+
+    // BACK 且不在播放 → 回主界面
+    if (btn == BTN_B && !s_record_playing) {
+        s_current_state = STATE_RECORD;
+        draw_record_main();
+        return;
+    }
+
+    // BACK 且在播放中 → 停止播放
+    if (btn == BTN_B && s_record_playing) {
+        audio_play_file_stop();
+        s_record_playing = false;
+        s_record_play_done = false;
+        draw_record_playback(false, false);
+        return;
+    }
+
+    // START 且不在播放 → 开始播放
+    if (btn == BTN_S && !s_record_playing && !s_record_play_done) {
+        if (audio_play_file_start("/spiffs/recording.wav")) {
+            s_record_playing = true;
+            s_record_play_done = false;
+            draw_record_playback(true, false);
+        }
+        return;
+    }
+
+    // 播放中 → 检测是否播完
+    if (s_record_playing) {
+        if (!audio_is_playing_file()) {
+            s_record_playing = false;
+            s_record_play_done = true;
+        }
+        draw_record_playback(s_record_playing, s_record_play_done);
+        return;
+    }
+
+    // 完毕态 → START 重新播放
+    if (btn == BTN_S && s_record_play_done) {
+        if (audio_play_file_start("/spiffs/recording.wav")) {
+            s_record_playing = true;
+            s_record_play_done = false;
+            draw_record_playback(true, false);
+        }
+        return;
+    }
+
+    draw_record_playback(false, s_record_play_done);
+}
+
 // ==================== WiFi 状态 Handler ====================
 
 static void handle_wifi_status(int btn)
@@ -493,6 +714,18 @@ extern "C" void app_main()
                 break;
             case STATE_GIF:
                 handle_gif(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_RECORD:
+                handle_record(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_RECORD_CAPTURE:
+                handle_record_capture(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_RECORD_PLAYBACK:
+                handle_record_playback(btn);
                 vTaskDelay(pdMS_TO_TICKS(10));
                 break;
             case STATE_PING:

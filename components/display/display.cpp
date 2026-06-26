@@ -79,13 +79,14 @@ static const char *s_menu_items[] = {
     "1. IMG Test",
     "2. Marquee",
     "3. GIF Test",
-    "4. Ping Test",
-    "5. HTTP GET",
-    "6. TCP Client",
-    "7. WIFI Status",
-    "8. WiFi Config",
+    "4. Record&Play",
+    "5. Ping Test",
+    "6. HTTP GET",
+    "7. TCP Client",
+    "8. WIFI Status",
+    "9. WiFi Config",
 };
-#define MENU_COUNT  8
+#define MENU_COUNT  9
 #define MENU_VISIBLE 5
 #define MENU_TBL_X  18
 #define MENU_TBL_Y  50
@@ -737,6 +738,208 @@ void draw_wifi_config_page(bool ap_active, bool connected, const char *ip)
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
         s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
+    }
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== 录音播放主界面 ====================
+
+void draw_record_main(void)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("Record & Play", 160, 20);
+
+    s_backbuffer.fillRect(60, 38, 200, 2, COLOR_WHITE);
+
+    // 录音卡片
+    int y = 52;
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[LEFT]  Record", 160, y + 16);
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("Start voice recording", 160, y + 38);
+
+    // 播放卡片
+    y = 118;
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.drawString("[RIGHT] Play", 160, y + 16);
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("Playback saved audio", 160, y + 38);
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("[BACK] Return to menu", 160, 228);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== 录音界面 ====================
+
+void draw_record_capture(bool recording, int time_left)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    if (recording) {
+        // === 录音中 ===
+        s_backbuffer.setTextColor(COLOR_RED);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("[REC]", 160, 18);
+
+        s_backbuffer.fillRect(60, 36, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("Time left", 160, 56);
+
+        s_backbuffer.setTextColor(COLOR_RED);
+        s_backbuffer.setTextSize(6);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", time_left);
+        s_backbuffer.drawString(buf, 160, 100);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("seconds", 160, 148);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Stop recording", 160, 228);
+
+    } else if (time_left == 0) {
+        // === 录音完毕 ===
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Record", 160, 20);
+
+        s_backbuffer.fillRect(60, 38, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("Done!", 160, 96);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1.5f);
+        s_backbuffer.drawString("File saved to SPIFFS", 160, 136);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[START] Record again  [BACK] Return", 160, 228);
+
+    } else {
+        // === 空闲 ===
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Record", 160, 20);
+
+        s_backbuffer.fillRect(60, 38, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("Press [START] to record", 160, 100);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("Max 15 seconds", 160, 132);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Return", 160, 228);
+    }
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== 播放界面 ====================
+
+void draw_record_playback(bool playing, bool finished)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    if (playing) {
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("[PLAY]", 160, 18);
+
+        s_backbuffer.fillRect(60, 36, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1.5f);
+        s_backbuffer.drawString("recording.wav", 160, 72);
+
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("~  ~  ~", 160, 124);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("Playing...", 160, 168);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Stop playback", 160, 228);
+
+    } else if (finished) {
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Play", 160, 20);
+
+        s_backbuffer.fillRect(60, 38, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("Done!", 160, 96);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1.5f);
+        s_backbuffer.drawString("recording.wav", 160, 136);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[START] Play again  [BACK] Return", 160, 228);
+
+    } else {
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("Play", 160, 20);
+
+        s_backbuffer.fillRect(60, 38, 200, 2, COLOR_WHITE);
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1.5f);
+        s_backbuffer.drawString("recording.wav", 160, 72);
+
+        s_backbuffer.setTextColor(COLOR_CYAN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString(">", 160, 114);
+
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("Press [START] to play", 160, 164);
+
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Return", 160, 228);
     }
 
     s_tft.startWrite();
