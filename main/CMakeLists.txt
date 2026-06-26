@@ -10,4 +10,5 @@ idf_component_register(
         storage
         audio
         net_test
+        record
 )

@@ -51,39 +51,10 @@ void audio_deinit(void);
  */
 bool audio_is_running(void);
 
-// ==================== 录音 (RX) ====================
-
 /**
- * @brief 开始录音到 WAV 文件（覆盖写入）
- * @param filepath  目标文件路径（如 "/spiffs/recording.wav"）
- * @param max_sec   最大录音时长（秒），到时自动停止
- * @return true 成功启动，false 正在录音/播放/循环中
+ * @brief 获取 I2S0 TX 通道句柄（供 record 组件播放录音文件）
  */
-bool audio_record_start(const char *filepath, int max_sec);
-
-/** @brief 停止录音并写入正确的 WAV 头部信息 */
-void audio_record_stop(void);
-
-/** @brief 查询是否正在录音 */
-bool audio_is_recording(void);
-
-/** @brief 返回已录音秒数（用于 UI 倒计时显示） */
-int  audio_record_time_elapsed(void);
-
-// ==================== 文件播放 (TX, 单次) ====================
-
-/**
- * @brief 播放指定 WAV 文件一次（非循环）
- * @param filepath  WAV 文件路径
- * @return true 成功启动，false 正在播放/录音/循环中
- */
-bool audio_play_file_start(const char *filepath);
-
-/** @brief 停止文件播放 */
-void audio_play_file_stop(void);
-
-/** @brief 查询是否正在播放文件 */
-bool audio_is_playing_file(void);
+i2s_chan_handle_t audio_get_tx_handle(void);
 
 #ifdef __cplusplus
 }

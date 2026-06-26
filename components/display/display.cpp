@@ -873,6 +873,19 @@ void draw_record_playback(bool playing, bool finished)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
+    // 读取 WAV 文件时长
+    int dur = 0;
+    FILE *f = fopen("/spiffs/recording.wav", "rb");
+    if (f) {
+        fseek(f, 4, SEEK_SET);
+        uint32_t fsize = 0; fread(&fsize, 4, 1, f);
+        dur = (int)((fsize - 36) / 44100);
+        if (dur < 0) dur = 0;
+        fclose(f);
+    }
+    char info[32];
+    snprintf(info, sizeof(info), "recording.wav %ds", dur);
+
     if (playing) {
         s_backbuffer.setTextColor(COLOR_GREEN);
         s_backbuffer.setTextSize(2);
@@ -883,7 +896,7 @@ void draw_record_playback(bool playing, bool finished)
 
         s_backbuffer.setTextColor(COLOR_GRAY);
         s_backbuffer.setTextSize(1.5f);
-        s_backbuffer.drawString("recording.wav", 160, 72);
+        s_backbuffer.drawString(info, 160, 72);
 
         s_backbuffer.setTextColor(COLOR_CYAN);
         s_backbuffer.setTextSize(3);
@@ -911,7 +924,7 @@ void draw_record_playback(bool playing, bool finished)
 
         s_backbuffer.setTextColor(COLOR_GRAY);
         s_backbuffer.setTextSize(1.5f);
-        s_backbuffer.drawString("recording.wav", 160, 136);
+        s_backbuffer.drawString(info, 160, 136);
 
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
@@ -927,7 +940,7 @@ void draw_record_playback(bool playing, bool finished)
 
         s_backbuffer.setTextColor(COLOR_GRAY);
         s_backbuffer.setTextSize(1.5f);
-        s_backbuffer.drawString("recording.wav", 160, 72);
+        s_backbuffer.drawString(info, 160, 72);
 
         s_backbuffer.setTextColor(COLOR_CYAN);
         s_backbuffer.setTextSize(3);

@@ -26,6 +26,7 @@
 #include "storage.h"
 #include "audio.h"
 #include "network.h"
+#include "record.h"
 
 static const char *TAG = "main";
 
@@ -421,6 +422,25 @@ static void handle_tcp(int btn)
 
 // ==================== 录音播放 Handler ====================
 
+static void ensure_recording_file(void)
+{
+    FILE *f = fopen("/spiffs/recording.wav", "rb");
+    if (f) { fclose(f); return; }
+    f = fopen("/spiffs/recording.wav", "wb");
+    if (!f) return;
+    uint32_t data_size = 0, riff_size = 36, fmt_size = 16;
+    uint16_t fmt_tag = 1, channels = 1, block_align = 2, bits = 16;
+    uint32_t sr = 22050, br = 44100, dc = 0x61746164;
+    fwrite("RIFF",1,4,f); fwrite(&riff_size,4,1,f);
+    fwrite("WAVE",1,4,f); fwrite("fmt ",1,4,f);
+    fwrite(&fmt_size,4,1,f); fwrite(&fmt_tag,2,1,f);
+    fwrite(&channels,2,1,f); fwrite(&sr,4,1,f);
+    fwrite(&br,4,1,f); fwrite(&block_align,2,1,f);
+    fwrite(&bits,2,1,f); fwrite(&dc,4,1,f);
+    fwrite(&data_size,4,1,f);
+    fclose(f);
+}
+
 static void handle_record(int btn)
 {
     if (btn == BTN_B) {
@@ -454,24 +474,7 @@ static void handle_record_capture(int btn)
         s_record_need_init = false;
         s_record_capturing = false;
         s_record_time_left = 15;
-        // 确保 recording.wav 存在
-        FILE *f = fopen("/spiffs/recording.wav", "rb");
-        if (!f) {
-            FILE *src = fopen("/spiffs/music.wav", "rb");
-            if (src) {
-                f = fopen("/spiffs/recording.wav", "wb");
-                if (f) {
-                    uint8_t buf[1024];
-                    size_t rd;
-                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
-                        fwrite(buf, 1, rd, f);
-                    fclose(f);
-                }
-                fclose(src);
-            }
-        } else {
-            fclose(f);
-        }
+        ensure_recording_file();
         draw_record_capture(false, 15);
         return;
     }
@@ -485,7 +488,7 @@ static void handle_record_capture(int btn)
 
     // BACK 且在录音中 → 停止录音
     if (btn == BTN_B && s_record_capturing) {
-        audio_record_stop();
+        record_stop();
         s_record_capturing = false;
         s_record_time_left = 0;
         draw_record_capture(false, 0);
@@ -494,25 +497,8 @@ static void handle_record_capture(int btn)
 
     // START 且不在录音 → 开始录音
     if (btn == BTN_S && !s_record_capturing) {
-        // 确保 recording.wav 存在
-        FILE *f = fopen("/spiffs/recording.wav", "rb");
-        if (!f) {
-            FILE *src = fopen("/spiffs/music.wav", "rb");
-            if (src) {
-                f = fopen("/spiffs/recording.wav", "wb");
-                if (f) {
-                    uint8_t buf[1024];
-                    size_t rd;
-                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
-                        fwrite(buf, 1, rd, f);
-                    fclose(f);
-                }
-                fclose(src);
-            }
-        } else {
-            fclose(f);
-        }
-        if (audio_record_start("/spiffs/recording.wav", 15)) {
+        ensure_recording_file();
+        if (record_start("/spiffs/recording.wav", 15)) {
             s_record_capturing = true;
             s_record_time_left = 15;
             draw_record_capture(true, 15);
@@ -522,11 +508,11 @@ static void handle_record_capture(int btn)
 
     // 录音中 → 检测自然结束
     if (s_record_capturing) {
-        if (!audio_is_recording()) {
+        if (!record_is_recording()) {
             s_record_capturing = false;
             s_record_time_left = 0;
         } else {
-            int elapsed = audio_record_time_elapsed();
+            int elapsed = record_time_elapsed();
             int left = 15 - elapsed;
             if (left < 0) left = 0;
             s_record_time_left = left;
@@ -537,7 +523,7 @@ static void handle_record_capture(int btn)
 
     // 完毕态 → START 重新录音
     if (btn == BTN_S) {
-        if (audio_record_start("/spiffs/recording.wav", 15)) {
+        if (record_start("/spiffs/recording.wav", 15)) {
             s_record_capturing = true;
             s_record_time_left = 15;
             draw_record_capture(true, 15);
@@ -555,24 +541,7 @@ static void handle_record_playback(int btn)
         s_record_need_init = false;
         s_record_playing = false;
         s_record_play_done = false;
-        // 确保 recording.wav 存在
-        FILE *f = fopen("/spiffs/recording.wav", "rb");
-        if (!f) {
-            FILE *src = fopen("/spiffs/music.wav", "rb");
-            if (src) {
-                f = fopen("/spiffs/recording.wav", "wb");
-                if (f) {
-                    uint8_t buf[1024];
-                    size_t rd;
-                    while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
-                        fwrite(buf, 1, rd, f);
-                    fclose(f);
-                }
-                fclose(src);
-            }
-        } else {
-            fclose(f);
-        }
+        ensure_recording_file();
         draw_record_playback(false, false);
         return;
     }
@@ -586,7 +555,7 @@ static void handle_record_playback(int btn)
 
     // BACK 且在播放中 → 停止播放
     if (btn == BTN_B && s_record_playing) {
-        audio_play_file_stop();
+        record_play_stop();
         s_record_playing = false;
         s_record_play_done = false;
         draw_record_playback(false, false);
@@ -595,7 +564,8 @@ static void handle_record_playback(int btn)
 
     // START 且不在播放 → 开始播放
     if (btn == BTN_S && !s_record_playing && !s_record_play_done) {
-        if (audio_play_file_start("/spiffs/recording.wav")) {
+        audio_stop();
+        if (record_play_start("/spiffs/recording.wav")) {
             s_record_playing = true;
             s_record_play_done = false;
             draw_record_playback(true, false);
@@ -605,7 +575,7 @@ static void handle_record_playback(int btn)
 
     // 播放中 → 检测是否播完
     if (s_record_playing) {
-        if (!audio_is_playing_file()) {
+        if (!record_is_playing()) {
             s_record_playing = false;
             s_record_play_done = true;
         }
@@ -615,7 +585,8 @@ static void handle_record_playback(int btn)
 
     // 完毕态 → START 重新播放
     if (btn == BTN_S && s_record_play_done) {
-        if (audio_play_file_start("/spiffs/recording.wav")) {
+        audio_stop();
+        if (record_play_start("/spiffs/recording.wav")) {
             s_record_playing = true;
             s_record_play_done = false;
             draw_record_playback(true, false);
@@ -690,6 +661,7 @@ extern "C" void app_main()
     display_init();
     draw_boot_screen();       // ← 立即显示启动画面
     audio_init();
+    record_init();
     buttons_init();
     storage_init();
     wifi_init();              // 非阻塞，后台连接
