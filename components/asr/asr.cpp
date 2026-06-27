@@ -121,6 +121,9 @@ static void upload_task(void *arg) {
 
 done:
     free((void*)path);       // 释放 strdup 的路径副本
+    if (s_last_result[0] == '\0') {
+        strcpy(s_last_result, "Server unreachable");
+    }
     s_busy = false;
     s_upload_task = nullptr;
     vTaskDelete(NULL);

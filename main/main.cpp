@@ -28,6 +28,7 @@
 #include "network.h"
 #include "record.h"
 #include "asr.h"
+#include "chat.h"
 #include "sd_card.h"
 
 static const char *TAG = "main";
@@ -48,11 +49,12 @@ enum AppState {
     STATE_WIFI_CONFIG,
     STATE_ASR,
     STATE_SD_CARD,
+    STATE_CHAT,
 };
 static AppState s_current_state = STATE_MENU;
 
 // ==================== 菜单状态 ====================
-#define MENU_ITEMS 11
+#define MENU_ITEMS 12
 #define MENU_VISIBLE 5          // 可见行数
 static int s_menu_sel = 0;      // 当前选中项 (0..6)
 static int s_menu_scroll = 0;   // 滚动偏移（顶部显示的项索引）
@@ -108,6 +110,7 @@ static void handle_record_capture(int btn);
 static void handle_record_playback(int btn);
 static void handle_asr(int btn);
 static void handle_sd_card(int btn);
+static void handle_chat(int btn);
 static void handle_wifi_status(int btn);
 static void handle_wifi_config(int btn);
 
@@ -146,6 +149,7 @@ static void handle_menu(int btn)
                 case 8: s_current_state = STATE_WIFI_CONFIG; break;
                 case 9: s_current_state = STATE_ASR;       break;
                 case 10: s_current_state = STATE_SD_CARD;  break;
+                case 11: s_current_state = STATE_CHAT;    break;
             }
             return;
         default: break;
@@ -851,6 +855,146 @@ static void handle_sd_card(int btn)
                         s_sd_write_kbps, s_sd_read_kbps, s_sd_testing);
 }
 
+// ==================== Chat Handler ====================
+
+static bool s_chat_need_init = true;
+static int  s_chat_cursor = 0;
+static int  s_chat_scroll = 0;
+static int  s_chat_phase = 0;  // 0=idle 1=preparing 2=recording 3=uploading 4=chatting
+
+static void handle_chat(int btn)
+{
+    if (s_chat_need_init) {
+        s_chat_need_init = false;
+        s_chat_phase = 0;
+        s_chat_cursor = strlen(chat_text_get());
+        draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, NULL);
+        return;
+    }
+
+    // Phase 0: 空闲 — 编辑 / START 录音 / UP 发送到 AI
+    if (s_chat_phase == 0) {
+        if (btn == BTN_B) {
+            s_chat_need_init = true;
+            chat_text_clear();
+            s_chat_cursor = 0;
+            s_chat_scroll = 0;
+            s_current_state = STATE_MENU;
+            draw_menu(s_menu_sel, s_menu_scroll);
+            return;
+        }
+        if (btn == BTN_S) {
+            ensure_recording_file();
+            if (record_start("/sdcard/rec.wav", 15)) {
+                s_chat_phase = 1;
+                draw_asr_preparing();
+            }
+            return;
+        }
+        if (btn == BTN_U) {
+            const char *all = chat_text_get();
+            if (all[0]) {
+                // 取最后一条用户输入的文本（跳过 "You: " 前缀）
+                const char *last = strrchr(all, '\n');
+                const char *msg = last ? last + 1 : all;
+                if (strncmp(msg, "You: ", 5) == 0) msg += 5;
+                else if (strncmp(msg, "AI: ", 4) == 0) msg = all;  // 只有 AI 回复，发全部
+                s_chat_phase = 4;
+                chat_send(msg);
+                draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, "Waiting AI...");
+            }
+            return;
+        }
+        if (btn == BTN_L) { s_chat_cursor = chat_cursor_prev(s_chat_cursor); }
+        if (btn == BTN_R) { s_chat_cursor = chat_cursor_next(s_chat_cursor); }
+        if (btn == BTN_D) { chat_text_delete(s_chat_cursor);
+                            if (s_chat_cursor > 0) s_chat_cursor = chat_cursor_prev(s_chat_cursor); }
+        draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, NULL);
+        return;
+    }
+
+    // Phase 1-3: 同 ASR（准备中 → 录音 → 上传），但上传后发到 /chat
+    if (s_chat_phase == 1) {
+        if (btn == BTN_B) { record_stop(); s_chat_phase = 0;
+            draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, NULL); return; }
+        if (record_is_capturing()) { s_chat_phase = 2; draw_record_capture(true, 15, NULL); }
+        return;
+    }
+
+    if (s_chat_phase == 2) {
+        static bool s_stop_pending = false;
+        static int64_t s_stop_req_us = 0;
+        if (btn == BTN_B && !s_stop_pending) {
+            s_stop_pending = true; s_stop_req_us = esp_timer_get_time();
+            int left = 15 - record_time_elapsed(); if (left < 0) left = 0;
+            draw_record_capture(true, left, "Stopping..."); return;
+        }
+        if (s_stop_pending) {
+            if (esp_timer_get_time() - s_stop_req_us >= 300000) {
+                record_stop(); vTaskDelay(pdMS_TO_TICKS(200)); s_stop_pending = false;
+                s_chat_phase = 3;
+                if (!asr_upload("/sdcard/rec.wav")) { s_chat_phase = 0; }
+                draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll,
+                          s_chat_phase == 3 ? "Recognizing..." : "Upload failed");
+                return;
+            }
+            int left = 15 - record_time_elapsed(); if (left < 0) left = 0;
+            draw_record_capture(true, left, "Stopping..."); return;
+        }
+        if (!record_is_recording()) {
+            record_stop(); vTaskDelay(pdMS_TO_TICKS(200));
+            s_chat_phase = 3;
+            if (!asr_upload("/sdcard/rec.wav")) { s_chat_phase = 0; }
+            draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll,
+                      s_chat_phase == 3 ? "Recognizing..." : "Upload failed");
+            return;
+        }
+        int left = 15 - record_time_elapsed(); if (left < 0) left = 0;
+        draw_record_capture(true, left, NULL); return;
+    }
+
+    // Phase 3: ASR 上传等待
+    if (s_chat_phase == 3) {
+        if (btn == BTN_B) { s_chat_phase = 0;
+            draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, NULL); return; }
+        if (asr_result_ready()) {
+            chat_text_append_user(asr_get_result());
+            s_chat_cursor = strlen(chat_text_get());
+            s_chat_scroll = 999;
+            remove("/sdcard/rec.wav");
+            s_chat_phase = 0;  // 回空闲，让用户编辑/继续录音
+        }
+        draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll,
+                  s_chat_phase == 3 ? "Recognizing..." : "Waiting AI...");
+        return;
+    }
+
+    // Phase 4: 等待 AI 回复
+    if (s_chat_phase == 4) {
+        if (btn == BTN_B) { s_chat_phase = 0;
+            draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll, NULL); return; }
+        if (chat_result_ready()) {
+            chat_text_append_ai(chat_get_reply());
+            s_chat_cursor = strlen(chat_text_get());
+            s_chat_scroll = 999;
+            // 播放 AI 回复音频
+            int alen = chat_get_audio_len();
+            if (alen > 44) {
+                FILE *af = fopen("/sdcard/chat_reply.wav", "wb");
+                if (af) {
+                    fwrite(chat_get_audio(), 1, alen, af);
+                    fclose(af);
+                    record_play_start("/sdcard/chat_reply.wav");
+                }
+            }
+            s_chat_phase = 0;
+        }
+        draw_chat(chat_text_get(), s_chat_cursor, &s_chat_scroll,
+                  s_chat_phase == 4 ? "Waiting AI..." : NULL);
+        return;
+    }
+}
+
 // ==================== WiFi 状态 Handler ====================
 
 static bool s_wifi_confirm = false;
@@ -988,6 +1132,10 @@ extern "C" void app_main()
             case STATE_SD_CARD:
                 handle_sd_card(btn);
                 vTaskDelay(pdMS_TO_TICKS(20));
+                break;
+            case STATE_CHAT:
+                handle_chat(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
                 break;
             case STATE_PING:
                 handle_ping(btn);

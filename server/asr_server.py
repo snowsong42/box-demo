@@ -336,23 +336,49 @@ class ASRHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/asr":
-            self._respond(404, "text/plain", b"Not Found")
+
+        # /asr — 语音识别
+        if path == "/asr":
+            length = int(self.headers.get("Content-Length", 0))
+            if length == 0:
+                self._respond(400, "application/json",
+                              json.dumps({"text":"","err":"Empty body"}).encode())
+                return
+            audio = self.rfile.read(length)
+            print(f"[ASR] Received {length} bytes from {self.client_address[0]}")
+            text, error = recognize(audio)
+            resp = {"text": text, "err": 0 if not error else error}
+            self._respond(200, "application/json; charset=utf-8",
+                          json.dumps(resp, ensure_ascii=False, separators=(',', ':')).encode())
             return
 
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
-            self._respond(400, "application/json",
-                          json.dumps({"text":"","err":"Empty body"}).encode())
+        # /chat — AI 对话 + TTS
+        if path == "/chat":
+            length = int(self.headers.get("Content-Length", 0))
+            if length == 0:
+                self._respond(400, "application/json",
+                              json.dumps({"reply":"","err":"Empty body"}).encode())
+                return
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                req = json.loads(body)
+            except Exception:
+                self._respond(400, "application/json",
+                              json.dumps({"reply":"","err":"Invalid JSON"}).encode())
+                return
+            user_text = req.get("text", "")
+            if not user_text or len(user_text) < 1:
+                self._respond(400, "application/json",
+                              json.dumps({"reply":"","err":"Empty text"}).encode())
+                return
+            print(f"[Chat] '{user_text}'")
+            reply, audio_b64 = _chat_reply(user_text)
+            resp = {"reply": reply, "audio_b64": audio_b64 or ""}
+            self._respond(200, "application/json; charset=utf-8",
+                          json.dumps(resp, ensure_ascii=False).encode())
             return
 
-        audio = self.rfile.read(length)
-        print(f"[ASR] Received {length} bytes from {self.client_address[0]}")
-
-        text, error = recognize(audio)
-        resp = {"text": text, "err": 0 if not error else error}
-        self._respond(200, "application/json; charset=utf-8",
-                      json.dumps(resp, ensure_ascii=False, separators=(',', ':')).encode())
+        self._respond(404, "text/plain", b"Not Found")
 
     def _respond(self, code, ctype, body):
         self.send_response(code)
@@ -362,6 +388,70 @@ class ASRHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
+
+def _chat_reply(text):
+    """DeepSeek AI 对话 + edge-tts 语音合成，返回 (reply, audio_b64_or_None)"""
+    reply = text  # 默认返回原文
+    audio_b64 = None
+    try:
+        import requests
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": [{
+                    "role": "system",
+                    "content": "你是box-demo语音助手。用简洁自然的语言回答，一般不超过3句话。"
+                }, {
+                    "role": "user", "content": text
+                }],
+                "temperature": 0.7,
+                "max_tokens": 300
+            },
+            timeout=15
+        )
+        if resp.status_code == 200:
+            reply = resp.json()["choices"][0]["message"]["content"].strip()
+            print(f"[Chat] Reply: '{reply}'")
+        else:
+            print(f"[Chat] DeepSeek HTTP {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"[Chat] DeepSeek error: {e}")
+
+    # 尝试 TTS
+    try:
+        import base64, asyncio
+        audio_b64 = asyncio.run(_tts(reply))
+        print(f"[Chat] TTS: {len(audio_b64)} chars base64")
+    except Exception as e:
+        print(f"[Chat] TTS failed: {e}")
+
+    return reply, audio_b64
+
+
+async def _tts(text):
+    """edge-tts 语音合成 → MP3 → WAV 转换，返回 base64 编码的 WAV"""
+    import edge_tts, base64, io, tempfile, os
+    communicate = edge_tts.Communicate(text, "zh-CN-XiaoxiaoNeural")
+    tmp_mp3 = os.path.join(tempfile.gettempdir(), f"_tts_{os.getpid()}.mp3")
+    await communicate.save(tmp_mp3)
+    try:
+        from pydub import AudioSegment
+        seg = AudioSegment.from_mp3(tmp_mp3)
+        seg = seg.set_frame_rate(22050).set_channels(1).set_sample_width(2)
+        wav_io = io.BytesIO()
+        seg.export(wav_io, format="wav")
+        wav_data = wav_io.getvalue()
+    except ImportError:
+        print("[Chat] TTS: pydub not installed, returning raw MP3")
+        with open(tmp_mp3, "rb") as f:
+            wav_data = f.read()
+    os.remove(tmp_mp3)
+    return base64.b64encode(wav_data).decode()
 
 # ==================== 主入口 ====================
 

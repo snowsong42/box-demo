@@ -12,4 +12,5 @@ idf_component_register(
         net_test
         record
         asr
+        chat
 )

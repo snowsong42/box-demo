@@ -9,7 +9,7 @@ if not exist ".venv" (
 
 echo Installing dependencies (may take a while)...
 set UV_HTTP_TIMEOUT=300
-uv pip install faster-whisper zhconv requests --python .venv\Scripts\python.exe
+uv pip install faster-whisper zhconv requests edge-tts pydub --python .venv\Scripts\python.exe
 
 echo.
 echo Setup complete!

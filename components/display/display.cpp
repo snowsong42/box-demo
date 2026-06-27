@@ -89,8 +89,9 @@ static const char *s_menu_items[] = {
     "9. WiFi Config",
     "10. ASR Voice",
     "11. SD Card",
+    "12. AI Chat",
 };
-#define MENU_COUNT  11
+#define MENU_COUNT  12
 #define MENU_VISIBLE 5
 #define MENU_TBL_X  18
 #define MENU_TBL_Y  50
@@ -1153,6 +1154,104 @@ void draw_sd_card_browse(const char *path, void *ventries,
     s_backbuffer.setTextSize(1);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
     s_backbuffer.drawString("[L] Up  [R] Enter  [U/D] Move  [BACK] Status", 160, 220);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== AI Chat 对话页面 ====================
+
+void draw_chat(const char *text, int cursor_byte, int *scroll_line, const char *status)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("AI Chat", 160, 16);
+    s_backbuffer.fillRect(20, 32, 280, 2, COLOR_WHITE);
+
+    int y = 38;
+    if (status) {
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString(status, 160, y + 6);
+        s_backbuffer.fillRect(20, y + 16, 280, 1, 0x2104);
+        y += 20;
+    }
+
+    const int LINE_H = 20, UNITS_PER_LINE = 36, MAX_VIS = 6, TX = 16, FW = 8;
+    const char *lines[80];
+    int total = 0;
+    const char *p = text;
+    while (*p && total < 80) {
+        lines[total++] = p;
+        int units = 0;
+        while (*p && *p != '\n') {
+            int cl = 1, cw = FW;
+            if ((*p & 0x80) != 0) {
+                cl = 1; while ((p[cl] & 0xC0) == 0x80) cl++;
+                cw = FW * 2;
+            }
+            if (units + cw > UNITS_PER_LINE * FW) break;
+            p += cl; units += cw;
+        }
+        if (*p == '\n') p++;
+    }
+
+    // 计算光标所在行
+    int cl = 0, cpx = 0, bc = 0; p = text;
+    while (*p && bc < cursor_byte) {
+        int clen = 1, cw = FW;
+        if ((*p & 0x80) != 0) {
+            clen = 1; while ((p[clen] & 0xC0) == 0x80) clen++;
+            cw = FW * 2;
+        }
+        if (cpx + cw > UNITS_PER_LINE * FW || *p == '\n') {
+            cpx = 0; cl++;
+            if (*p == '\n') { p++; bc++; continue; }
+        }
+        bc += clen; cpx += cw; p += clen;
+    }
+
+    // 自动滚动
+    int sl_scroll = *scroll_line;
+    if (cl < sl_scroll) sl_scroll = cl;
+    if (cl >= sl_scroll + MAX_VIS) sl_scroll = cl - MAX_VIS + 1;
+    if (sl_scroll > total - MAX_VIS) sl_scroll = total - MAX_VIS;
+    if (sl_scroll < 0) sl_scroll = 0;
+    *scroll_line = sl_scroll;
+
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setFont(&fonts::efontCN_16);
+    uint16_t cur_color = COLOR_WHITE;  // 跟踪当前发言者颜色，续行继承
+    for (int i = 0; i < MAX_VIS && (i + sl_scroll) < total; i++) {
+        int li = i + sl_scroll;
+        const char *s = lines[li], *e;
+        if (li + 1 < total) { e = lines[li + 1]; if (*(e - 1) == '\n') e--; }
+        else e = s + strlen(s);
+        int len = e - s; if (len > 63) len = 63;
+        char lb[64] = {0}; memcpy(lb, s, len);
+        if (strncmp(lb, "You:", 4) == 0)
+            cur_color = COLOR_GREEN;
+        else if (strncmp(lb, "AI:", 3) == 0)
+            cur_color = COLOR_CYAN;
+        s_backbuffer.setTextColor(cur_color);
+        s_backbuffer.setTextDatum(textdatum_t::top_left);
+        s_backbuffer.drawString(lb, TX, y + i * LINE_H);
+    }
+
+    int sl = cl - sl_scroll;
+    if (sl >= 0 && sl < MAX_VIS) {
+        s_backbuffer.fillRect(TX + cpx, y + sl * LINE_H, 2, LINE_H, COLOR_RED);
+    }
+
+    s_backbuffer.setFont(nullptr);
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[START] Rec  [UP] Send  [L/R] Move  [DOWN] Del  [BACK]", 160, 220);
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);

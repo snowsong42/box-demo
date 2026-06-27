@@ -222,6 +222,15 @@ void draw_sd_card_status(bool mounted, const char *name, const char *fs_type,
 void draw_sd_card_browse(const char *path, void *entries,
                          int count, int selection, int scroll);
 
+// ==================== AI Chat UI ====================
+
+/** @brief 绘制 AI Chat 对话页面
+ *  @param text        对话历史文本
+ *  @param cursor_byte 光标位置（字节偏移）
+ *  @param scroll_line [in/out] 滚动行数
+ *  @param status      状态文本（NULL=隐藏） */
+void draw_chat(const char *text, int cursor_byte, int *scroll_line, const char *status);
+
 #ifdef __cplusplus
 }
 #endif
