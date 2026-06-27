@@ -13,10 +13,11 @@ static const char *TAG = "audio";
 static i2s_chan_handle_t s_tx_chan = nullptr;
 static TaskHandle_t s_audio_task = nullptr;
 static bool s_audio_running = false;
+static bool s_tx_enabled = false;
 
 static void audio_playback_task(void *arg)
 {
-    const char *path = "/spiffs/music.wav";
+    const char *path = "/sdcard/music.wav";
     while (s_audio_running) {
         FILE *f = fopen(path, "rb");
         if (!f) {
@@ -62,6 +63,7 @@ void audio_start(void)
     if (s_audio_running) return;
     s_audio_running = true;
     i2s_channel_enable(s_tx_chan);
+    s_tx_enabled = true;
     xTaskCreate(audio_playback_task, "audio", 4096, NULL, 1, &s_audio_task);
 }
 
@@ -71,16 +73,20 @@ void audio_stop(void)
     if (s_audio_task) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    i2s_channel_disable(s_tx_chan);
+    if (s_tx_enabled) {
+        i2s_channel_disable(s_tx_chan);
+        s_tx_enabled = false;
+    }
 }
 
 void audio_deinit(void)
 {
     if (s_audio_running) audio_stop();
-    if (s_tx_chan) {
+    if (s_tx_chan && s_tx_enabled) {
         i2s_channel_disable(s_tx_chan);
-        s_tx_chan = nullptr;
+        s_tx_enabled = false;
     }
+    s_tx_chan = nullptr;
 }
 
 bool audio_is_running(void)

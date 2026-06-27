@@ -13,5 +13,5 @@
     "C:\\Espressif\\tools\\python\\v6.0.1\\venv\\Scripts"
   ],
   "idf.currentSetup": "D:\\EE\\ESP-IDF\\.espressif\\v6.0.1\\esp-idf",
-  "idf.portWin": "COM8"
+  "idf.portWin": "COM7"
 }

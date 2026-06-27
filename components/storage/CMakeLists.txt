@@ -1,8 +1,15 @@
 idf_component_register(
     SRCS
         "storage.cpp"
+        "sd_card.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
         spiffs
+        driver
+        sdmmc
+        vfs
+        fatfs
+        esp_timer
+        esp_driver_sdspi
 )

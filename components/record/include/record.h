@@ -44,6 +44,9 @@ bool record_is_recording(void);
 /** @brief 返回已录音秒数 */
 int  record_time_elapsed(void);
 
+/** @brief 查询麦克风是否已开始采集音频（I2S 已使能且过了稳定延迟） */
+bool record_is_capturing(void);
+
 /**
  * @brief 播放指定 WAV 文件一次（非循环，使用 I2S0 TX）
  * @param filepath WAV 文件路径

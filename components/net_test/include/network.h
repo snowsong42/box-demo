@@ -60,6 +60,9 @@ void wifi_prov_web_stop(void);
  */
 bool wifi_prov_is_done(void);
 
+/** @brief 清除已保存的 WiFi 凭据并断开连接 */
+void wifi_clear_credentials(void);
+
 /**
  * @brief 检查 WiFi 是否已连接
  */

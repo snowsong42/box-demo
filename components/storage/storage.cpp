@@ -5,6 +5,7 @@
  */
 
 #include "storage.h"
+#include "sd_card.h"
 #include <stdio.h>
 #include "esp_spiffs.h"
 #include "esp_log.h"
@@ -31,6 +32,9 @@ void storage_init(void)
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "SPIFFS: total=%d used=%d", total, used);
     }
+
+    // 尝试挂载 SD 卡（静默，失败不影响系统运行）
+    sd_card_init();
 }
 
 int detect_img_count(void)
@@ -38,7 +42,7 @@ int detect_img_count(void)
     int count = 0;
     for (int i = 1; i <= 99; i++) {
         char path[32];
-        snprintf(path, sizeof(path), "/spiffs/%04d.png", i);
+        snprintf(path, sizeof(path), "/sdcard/%04d.png", i);
         FILE *f = fopen(path, "r");
         if (f) {
             fclose(f);

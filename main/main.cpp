@@ -27,6 +27,8 @@
 #include "audio.h"
 #include "network.h"
 #include "record.h"
+#include "asr.h"
+#include "sd_card.h"
 
 static const char *TAG = "main";
 
@@ -44,11 +46,13 @@ enum AppState {
     STATE_TCP,
     STATE_WIFI_STATUS,
     STATE_WIFI_CONFIG,
+    STATE_ASR,
+    STATE_SD_CARD,
 };
 static AppState s_current_state = STATE_MENU;
 
 // ==================== 菜单状态 ====================
-#define MENU_ITEMS 9
+#define MENU_ITEMS 11
 #define MENU_VISIBLE 5          // 可见行数
 static int s_menu_sel = 0;      // 当前选中项 (0..6)
 static int s_menu_scroll = 0;   // 滚动偏移（顶部显示的项索引）
@@ -79,6 +83,14 @@ static bool s_record_playing = false;
 static bool s_record_play_done = false;
 static int  s_record_time_left = 15;
 
+// ==================== ASR 状态 ====================
+static bool s_asr_need_init = true;
+static int  s_asr_cursor = 0;
+static int  s_asr_scroll = 0;
+static int  s_asr_phase = 0;  // 0=idle 1=preparing 2=recording 3=uploading
+static bool s_asr_stop_pending = false;
+static int64_t s_asr_stop_req_us = 0;
+
 // ==================== 网络测试共用状态 ====================
 static bool s_net_prov_mode = false;
 static int s_net_scroll = 0;
@@ -94,6 +106,8 @@ static void handle_tcp(int btn);
 static void handle_record(int btn);
 static void handle_record_capture(int btn);
 static void handle_record_playback(int btn);
+static void handle_asr(int btn);
+static void handle_sd_card(int btn);
 static void handle_wifi_status(int btn);
 static void handle_wifi_config(int btn);
 
@@ -130,6 +144,8 @@ static void handle_menu(int btn)
                 case 6: s_current_state = STATE_TCP;     break;
                 case 7: s_current_state = STATE_WIFI_STATUS; break;
                 case 8: s_current_state = STATE_WIFI_CONFIG; break;
+                case 9: s_current_state = STATE_ASR;       break;
+                case 10: s_current_state = STATE_SD_CARD;  break;
             }
             return;
         default: break;
@@ -167,7 +183,7 @@ static void handle_img(int btn)
 
         for (int i = 0; i < s_img_count; i++) {
             char path[32];
-            snprintf(path, sizeof(path), "/spiffs/%04d.png", i + 1);
+            snprintf(path, sizeof(path), "/sdcard/%04d.png", i + 1);
             get_png_size(path, &s_img_w_cache[i], &s_img_h_cache[i]);
         }
 
@@ -186,7 +202,9 @@ static void handle_img(int btn)
         case BTN_S:
             if (audio_is_running()) audio_stop(); else audio_start();
             break;
-        default: break;
+        default:
+            if (btn == BTN_NONE) return;  // 无按键不重绘
+            break;
     }
     draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache);
 }
@@ -216,7 +234,7 @@ static void handle_marquee(int btn)
         s_scroll_offset = 0;
         s_marquee_paused = false;
         if (!s_marquee_raw) {
-            FILE *fp = fopen("/spiffs/500x150.raw", "rb");
+            FILE *fp = fopen("/sdcard/500x150.raw", "rb");
             if (fp) {
                 size_t sz = 500UL * 150 * 2;
                 s_marquee_raw = (uint16_t *)heap_caps_malloc(sz, MALLOC_CAP_SPIRAM);
@@ -316,7 +334,7 @@ static void handle_ping(int btn)
     }
 
     if (!wifi_is_connected()) {
-        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        if (btn == BTN_S) { s_current_state = STATE_WIFI_CONFIG; return; }
         draw_wifi_not_connected();
         return;
     }
@@ -356,7 +374,7 @@ static void handle_http(int btn)
     }
 
     if (!wifi_is_connected()) {
-        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        if (btn == BTN_S) { s_current_state = STATE_WIFI_CONFIG; return; }
         draw_wifi_not_connected();
         return;
     }
@@ -396,7 +414,7 @@ static void handle_tcp(int btn)
     }
 
     if (!wifi_is_connected()) {
-        if (btn == BTN_S) { s_net_prov_mode = true; wifi_prov_web_start(); }
+        if (btn == BTN_S) { s_current_state = STATE_WIFI_CONFIG; return; }
         draw_wifi_not_connected();
         return;
     }
@@ -424,9 +442,9 @@ static void handle_tcp(int btn)
 
 static void ensure_recording_file(void)
 {
-    FILE *f = fopen("/spiffs/recording.wav", "rb");
+    FILE *f = fopen("/sdcard/rec.wav", "rb");
     if (f) { fclose(f); return; }
-    f = fopen("/spiffs/recording.wav", "wb");
+    f = fopen("/sdcard/rec.wav", "wb");
     if (!f) return;
     uint32_t data_size = 0, riff_size = 36, fmt_size = 16;
     uint16_t fmt_tag = 1, channels = 1, block_align = 2, bits = 16;
@@ -475,7 +493,7 @@ static void handle_record_capture(int btn)
         s_record_capturing = false;
         s_record_time_left = 15;
         ensure_recording_file();
-        draw_record_capture(false, 15);
+        draw_record_capture(false, 15, NULL);
         return;
     }
 
@@ -491,17 +509,17 @@ static void handle_record_capture(int btn)
         record_stop();
         s_record_capturing = false;
         s_record_time_left = 0;
-        draw_record_capture(false, 0);
+        draw_record_capture(false, 0, NULL);
         return;
     }
 
     // START 且不在录音 → 开始录音
     if (btn == BTN_S && !s_record_capturing) {
         ensure_recording_file();
-        if (record_start("/spiffs/recording.wav", 15)) {
+        if (record_start("/sdcard/rec.wav", 15)) {
             s_record_capturing = true;
             s_record_time_left = 15;
-            draw_record_capture(true, 15);
+            draw_record_capture(true, 15, NULL);
         }
         return;
     }
@@ -517,21 +535,21 @@ static void handle_record_capture(int btn)
             if (left < 0) left = 0;
             s_record_time_left = left;
         }
-        draw_record_capture(s_record_capturing, s_record_time_left);
+        draw_record_capture(s_record_capturing, s_record_time_left, NULL);
         return;
     }
 
     // 完毕态 → START 重新录音
     if (btn == BTN_S) {
-        if (record_start("/spiffs/recording.wav", 15)) {
+        if (record_start("/sdcard/rec.wav", 15)) {
             s_record_capturing = true;
             s_record_time_left = 15;
-            draw_record_capture(true, 15);
+            draw_record_capture(true, 15, NULL);
         }
         return;
     }
 
-    draw_record_capture(false, s_record_time_left);
+    draw_record_capture(false, s_record_time_left, NULL);
 }
 
 static void handle_record_playback(int btn)
@@ -565,7 +583,7 @@ static void handle_record_playback(int btn)
     // START 且不在播放 → 开始播放
     if (btn == BTN_S && !s_record_playing && !s_record_play_done) {
         audio_stop();
-        if (record_play_start("/spiffs/recording.wav")) {
+        if (record_play_start("/sdcard/rec.wav")) {
             s_record_playing = true;
             s_record_play_done = false;
             draw_record_playback(true, false);
@@ -586,7 +604,7 @@ static void handle_record_playback(int btn)
     // 完毕态 → START 重新播放
     if (btn == BTN_S && s_record_play_done) {
         audio_stop();
-        if (record_play_start("/spiffs/recording.wav")) {
+        if (record_play_start("/sdcard/rec.wav")) {
             s_record_playing = true;
             s_record_play_done = false;
             draw_record_playback(true, false);
@@ -597,51 +615,314 @@ static void handle_record_playback(int btn)
     draw_record_playback(false, s_record_play_done);
 }
 
+// ==================== ASR Handler ====================
+
+static void handle_asr(int btn)
+{
+    if (s_asr_need_init) {
+        s_asr_need_init = false;
+        s_asr_phase = 0;
+        s_asr_cursor = strlen(asr_text_get());
+        draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll, NULL);
+        return;
+    }
+
+    // Phase 0: 空闲 — 编辑文本 / 按 START 开始录音
+    if (s_asr_phase == 0) {
+        if (btn == BTN_B) {
+            s_asr_need_init = true;
+            asr_text_clear();
+            s_asr_cursor = 0;
+            s_asr_scroll = 0;
+            s_current_state = STATE_MENU;
+            draw_menu(s_menu_sel, s_menu_scroll);
+            return;
+        }
+        if (btn == BTN_S) {
+            ensure_recording_file();
+            if (record_start("/sdcard/rec.wav", 15)) {
+                s_asr_phase = 1;  // 进入准备中
+                draw_asr_preparing();
+            }
+            return;
+        }
+        if (btn == BTN_L) { s_asr_cursor = asr_cursor_prev(s_asr_cursor); }
+        if (btn == BTN_R) { s_asr_cursor = asr_cursor_next(s_asr_cursor); }
+        if (btn == BTN_D) { asr_text_delete(s_asr_cursor);
+                            if (s_asr_cursor > 0) s_asr_cursor = asr_cursor_prev(s_asr_cursor); }
+        draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll, NULL);
+        return;
+    }
+
+    // Phase 1: 准备中 — 等待麦克风初始化完成
+    if (s_asr_phase == 1) {
+        if (btn == BTN_B) {
+            // 取消录音
+            record_stop();
+            s_asr_phase = 0;
+            draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll, NULL);
+            return;
+        }
+        if (record_is_capturing()) {
+            // 麦克风已就绪，进入倒计时录音
+            s_asr_phase = 2;
+            s_asr_stop_pending = false;
+            draw_record_capture(true, 15, NULL);
+        }
+        return;
+    }
+
+    // Phase 2: 录音中 — 倒计时 + 300ms 缓冲停止
+    if (s_asr_phase == 2) {
+        // 用户请求停止 → 启动缓冲（不立即停，给 300ms 尾音时间）
+        if (btn == BTN_B && !s_asr_stop_pending) {
+            s_asr_stop_pending = true;
+            s_asr_stop_req_us = esp_timer_get_time();
+            int elapsed = record_time_elapsed();
+            int left = 15 - elapsed;
+            if (left < 0) left = 0;
+            draw_record_capture(true, left, "Stopping...");
+            return;
+        }
+        // 缓冲等待中 → 300ms 后真正停止
+        if (s_asr_stop_pending) {
+            if (esp_timer_get_time() - s_asr_stop_req_us >= 300000) {
+                record_stop();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                s_asr_stop_pending = false;
+                s_asr_phase = 3;
+                if (!asr_upload("/sdcard/rec.wav")) {
+                    ESP_LOGW(TAG, "ASR upload failed");
+                    s_asr_phase = 0;
+                }
+                draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll,
+                              s_asr_phase == 3 ? "Uploading..." : "Upload failed");
+                return;
+            }
+            // 仍在缓冲，继续显示倒计时
+            int elapsed = record_time_elapsed();
+            int left = 15 - elapsed;
+            if (left < 0) left = 0;
+            draw_record_capture(true, left, "Stopping...");
+            return;
+        }
+        // 自然超时 → 停止并上传
+        if (!record_is_recording()) {
+            record_stop();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            s_asr_phase = 3;
+            if (!asr_upload("/sdcard/rec.wav")) {
+                ESP_LOGW(TAG, "ASR upload failed");
+                s_asr_phase = 0;
+            }
+            draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll,
+                          s_asr_phase == 3 ? "Uploading..." : "Upload failed");
+            return;
+        }
+        // 正常录音中 → 更新倒计时
+        int elapsed = record_time_elapsed();
+        int left = 15 - elapsed;
+        if (left < 0) left = 0;
+        draw_record_capture(true, left, NULL);
+        return;
+    }
+
+    // Phase 3: 上传中 — 等待服务器返回
+    if (s_asr_phase == 3) {
+        if (btn == BTN_B) {
+            s_asr_phase = 0;
+            draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll, NULL);
+            return;
+        }
+        if (asr_result_ready()) {
+            asr_text_append(asr_get_result());
+            s_asr_cursor = strlen(asr_text_get());
+            s_asr_scroll = 999;  // 自动滚到最新行（draw 里 clamp）
+            s_asr_phase = 0;
+            remove("/sdcard/rec.wav");  // 上传成功，删除录音释放空间
+        }
+        draw_asr_text(asr_text_get(), s_asr_cursor, &s_asr_scroll,
+                      s_asr_phase == 3 ? "Uploading & recognizing..." : NULL);
+        return;
+    }
+}
+
+// ==================== SD 卡 Handler ====================
+
+static bool s_sd_browsing = false;
+static char s_sd_cur_path[128] = "/sdcard";
+static sd_card_entry_t s_sd_entries[64];
+static int  s_sd_entry_count = 0;
+static int  s_sd_browse_sel = 0;
+static int  s_sd_browse_scroll = 0;
+
+static bool s_sd_testing = false;
+static int  s_sd_write_kbps = -1;
+static int  s_sd_read_kbps = -1;
+
+static void handle_sd_card(int btn)
+{
+    if (btn == BTN_B) {
+        if (s_sd_browsing) {
+            s_sd_browsing = false;  // 退出浏览回状态页
+        } else {
+            s_sd_testing = false;
+            s_current_state = STATE_MENU;
+            draw_menu(s_menu_sel, s_menu_scroll);
+            return;
+        }
+    }
+
+    // === 浏览模式 ===
+    if (s_sd_browsing) {
+        if (btn == BTN_L) {
+            if (strcmp(s_sd_cur_path, "/sdcard") != 0) {
+                char *slash = strrchr(s_sd_cur_path, '/');
+                if (slash) *slash = '\0';
+                if (s_sd_cur_path[0] == '\0') strcpy(s_sd_cur_path, "/sdcard");
+                s_sd_entry_count = sd_card_list_dir(s_sd_cur_path, s_sd_entries, 64);
+                s_sd_browse_sel = 0; s_sd_browse_scroll = 0;
+                ESP_LOGI(TAG, "SD browse: '%s' (%d entries)", s_sd_cur_path, s_sd_entry_count);
+                for (int i = 0; i < s_sd_entry_count; i++) {
+                    ESP_LOGI(TAG, "  %s %s  %u B",
+                             s_sd_entries[i].is_dir ? "[D]" : "[F]",
+                             s_sd_entries[i].name, (unsigned)s_sd_entries[i].size);
+                }
+            }
+        } else if (btn == BTN_R && s_sd_entry_count > 0) {
+            int idx = s_sd_browse_sel;
+            if (idx < s_sd_entry_count && s_sd_entries[idx].is_dir) {
+                char tmp[256];
+                snprintf(tmp, sizeof(tmp), "%s/%s",
+                         s_sd_cur_path, s_sd_entries[idx].name);
+                strcpy(s_sd_cur_path, tmp);
+                s_sd_entry_count = sd_card_list_dir(s_sd_cur_path, s_sd_entries, 64);
+                s_sd_browse_sel = 0; s_sd_browse_scroll = 0;
+                ESP_LOGI(TAG, "SD browse: '%s' (%d entries)", s_sd_cur_path, s_sd_entry_count);
+                for (int i = 0; i < s_sd_entry_count; i++) {
+                    ESP_LOGI(TAG, "  %s %s  %u B",
+                             s_sd_entries[i].is_dir ? "[D]" : "[F]",
+                             s_sd_entries[i].name, (unsigned)s_sd_entries[i].size);
+                }
+            }
+        } else if (btn == BTN_U && s_sd_browse_sel > 0) {
+            s_sd_browse_sel--;
+        } else if (btn == BTN_D && s_sd_browse_sel < s_sd_entry_count - 1) {
+            s_sd_browse_sel++;
+        }
+        if (s_sd_browse_sel < s_sd_browse_scroll) s_sd_browse_scroll = s_sd_browse_sel;
+        if (s_sd_browse_sel >= s_sd_browse_scroll + 6) s_sd_browse_scroll = s_sd_browse_sel - 5;
+        draw_sd_card_browse(s_sd_cur_path, s_sd_entries, s_sd_entry_count,
+                            s_sd_browse_sel, s_sd_browse_scroll);
+        return;
+    }
+
+    // === 状态页模式 ===
+    if (btn == BTN_R) {
+        s_sd_browsing = true;
+        strcpy(s_sd_cur_path, "/sdcard");
+        s_sd_entry_count = sd_card_list_dir(s_sd_cur_path, s_sd_entries, 64);
+        s_sd_browse_sel = 0; s_sd_browse_scroll = 0;
+        ESP_LOGI(TAG, "SD browse: '%s' (%d entries)", s_sd_cur_path, s_sd_entry_count);
+        for (int i = 0; i < s_sd_entry_count; i++) {
+            ESP_LOGI(TAG, "  %s %s  %u B",
+                     s_sd_entries[i].is_dir ? "[D]" : "[F]",
+                     s_sd_entries[i].name, (unsigned)s_sd_entries[i].size);
+        }
+    }
+
+    if (btn == BTN_S && !s_sd_testing) {
+        s_sd_testing = true; s_sd_write_kbps = -1; s_sd_read_kbps = -1;
+        sd_card_info_t info; sd_card_get_info(&info);
+        draw_sd_card_status(sd_card_mounted(), info.name, info.fs_type,
+                            (int)(info.total_bytes/(1024*1024)),
+                            (int)(info.free_bytes/(1024*1024)), -1, -1, true);
+        int w_ms = -1, r_ms = -1;
+        sd_card_speed_test(&w_ms, &r_ms);
+        s_sd_testing = false;
+        if (w_ms > 0) s_sd_write_kbps = (int)(512LL * 1000 / w_ms);
+        if (r_ms > 0) s_sd_read_kbps  = (int)(512LL * 1000 / r_ms);
+    }
+
+    sd_card_info_t info; sd_card_get_info(&info);
+    draw_sd_card_status(sd_card_mounted(), info.name, info.fs_type,
+                        (int)(info.total_bytes/(1024*1024)),
+                        (int)(info.free_bytes/(1024*1024)),
+                        s_sd_write_kbps, s_sd_read_kbps, s_sd_testing);
+}
+
 // ==================== WiFi 状态 Handler ====================
+
+static bool s_wifi_confirm = false;
 
 static void handle_wifi_status(int btn)
 {
     if (btn == BTN_B) {
-        s_current_state = STATE_MENU;
-        draw_menu(s_menu_sel, s_menu_scroll);
-        return;
+        if (s_wifi_confirm) {
+            s_wifi_confirm = false;  // 取消确认
+        } else {
+            s_current_state = STATE_MENU;
+            draw_menu(s_menu_sel, s_menu_scroll);
+            return;
+        }
+    }
+
+    if (btn == BTN_S) {
+        if (s_wifi_confirm) {
+            wifi_clear_credentials();
+            s_wifi_confirm = false;
+        } else {
+            s_wifi_confirm = true;
+        }
     }
 
     wifi_status_t st;
     wifi_get_status(&st);
-    draw_wifi_status_big(st.ssid, st.ip, st.rssi, st.mac);
+    draw_wifi_status_big(st.ssid, st.ip, st.rssi, st.mac, s_wifi_confirm);
 }
 
 // ==================== WiFi Config Handler ====================
 
-static bool s_wifi_cfg_ap_active = false;
+static int s_wifi_cfg_phase = 0;
+static bool s_wifi_cfg_first = true;
 
 static void handle_wifi_config(int btn)
 {
-    // 配网完成（网页端提交了凭据）→ 清理 AP/HTTP Server
-    if (wifi_prov_is_done() && s_wifi_cfg_ap_active) {
+    if (s_wifi_cfg_phase == 1 && wifi_prov_is_done()) {
         wifi_prov_web_stop();
-        s_wifi_cfg_ap_active = false;
+        s_wifi_cfg_phase = 2;
+    }
+    if (s_wifi_cfg_phase == 2 && wifi_is_connected()) {
+        s_wifi_cfg_phase = 3;
+    }
+    if (s_wifi_cfg_first) {
+        s_wifi_cfg_first = false;
+        if (wifi_is_connected()) s_wifi_cfg_phase = 3;
     }
 
     if (btn == BTN_B) {
-        if (s_wifi_cfg_ap_active) {
-            wifi_prov_web_stop();
-            s_wifi_cfg_ap_active = false;
-        }
+        if (s_wifi_cfg_phase == 1) wifi_prov_web_stop();
+        s_wifi_cfg_phase = 0;
+        s_wifi_cfg_first = true;
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
     }
 
-    if (btn == BTN_S && !s_wifi_cfg_ap_active) {
-        wifi_prov_web_start();
-        s_wifi_cfg_ap_active = true;
+    if (btn == BTN_S) {
+        if (s_wifi_cfg_phase == 0) {
+            wifi_prov_web_start();
+            s_wifi_cfg_phase = 1;
+        } else if (s_wifi_cfg_phase == 3) {
+            wifi_clear_credentials();
+            wifi_prov_web_start();
+            s_wifi_cfg_phase = 1;
+        }
     }
 
     wifi_status_t st;
     wifi_get_status(&st);
-    draw_wifi_config_page(s_wifi_cfg_ap_active, wifi_is_connected(),
+    draw_wifi_config_page(s_wifi_cfg_phase, wifi_is_connected(),
                           st.ip[0] ? st.ip : NULL);
 }
 
@@ -699,6 +980,14 @@ extern "C" void app_main()
             case STATE_RECORD_PLAYBACK:
                 handle_record_playback(btn);
                 vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_ASR:
+                handle_asr(btn);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                break;
+            case STATE_SD_CARD:
+                handle_sd_card(btn);
+                vTaskDelay(pdMS_TO_TICKS(20));
                 break;
             case STATE_PING:
                 handle_ping(btn);

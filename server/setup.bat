@@ -7,8 +7,9 @@ if not exist ".venv" (
     uv venv --python 3.12
 )
 
-echo Installing dependencies...
-.venv\Scripts\pip.exe install faster-whisper flask
+echo Installing dependencies (may take a while)...
+set UV_HTTP_TIMEOUT=300
+uv pip install faster-whisper zhconv requests --python .venv\Scripts\python.exe
 
 echo.
 echo Setup complete!

@@ -5,6 +5,8 @@
  */
 
 #include "display.h"
+#include "sd_card.h"
+#include <lgfx/v1/lgfx_fonts.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -85,8 +87,10 @@ static const char *s_menu_items[] = {
     "7. TCP Client",
     "8. WIFI Status",
     "9. WiFi Config",
+    "10. ASR Voice",
+    "11. SD Card",
 };
-#define MENU_COUNT  9
+#define MENU_COUNT  11
 #define MENU_VISIBLE 5
 #define MENU_TBL_X  18
 #define MENU_TBL_Y  50
@@ -177,7 +181,7 @@ void draw_img_browser(int img_index, int img_count,
 {
     int idx = img_index + 1;
     char path[32];
-    snprintf(path, sizeof(path), "/spiffs/%04d.png", idx);
+    snprintf(path, sizeof(path), "/sdcard/%04d.png", idx);
     ESP_LOGI(TAG, "IMG loading: %s", path);
 
     // 缓存 PNG 尺寸
@@ -294,7 +298,7 @@ int load_gif_frames(void)
         s_gif_frames[i].fillScreen(COLOR_BLACK);
 
         char path[32];
-        snprintf(path, sizeof(path), "/spiffs/gif_%04d.png", i + 1);
+        snprintf(path, sizeof(path), "/sdcard/gif_%04d.png", i + 1);
         FILE *fp = fopen(path, "rb");
         if (fp) {
             fseek(fp, 0, SEEK_END);
@@ -621,7 +625,7 @@ void draw_boot_screen(void)
 
 // ==================== WiFi 状态大字体面板 ====================
 
-void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char *mac)
+void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char *mac, bool confirm)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
@@ -674,7 +678,14 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
     s_backbuffer.setTextColor(0x632C);
     s_backbuffer.setTextSize(1);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
-    s_backbuffer.drawString("[BACK] Return", 160, 228);
+    if (confirm) {
+        s_backbuffer.setTextColor(COLOR_YELLOW);
+        s_backbuffer.drawString("Clear WiFi config?", 160, 200);
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.drawString("[START] Confirm  [BACK] Cancel", 160, 228);
+    } else {
+        s_backbuffer.drawString("[START] Clear WiFi  [BACK] Return", 160, 228);
+    }
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
@@ -683,61 +694,63 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
 
 // ==================== WiFi 配置引导页 ====================
 
-void draw_wifi_config_page(bool ap_active, bool connected, const char *ip)
+void draw_wifi_config_page(int phase, bool connected, const char *ip)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
-    if (connected) {
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("WiFi Config", 160, 20);
+    s_backbuffer.fillRect(20, 38, 280, 2, COLOR_WHITE);
+
+    if (phase == 1) {
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("1. Connect phone to:", 160, 62);
+        s_backbuffer.setTextColor(COLOR_YELLOW);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("box-demo", 160, 92);
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("2. Open browser:", 160, 130);
         s_backbuffer.setTextColor(COLOR_GREEN);
         s_backbuffer.setTextSize(3);
-        s_backbuffer.setTextDatum(textdatum_t::middle_center);
-        s_backbuffer.drawString("Connected!", 160, 80);
-
+        s_backbuffer.drawString("192.168.4.1", 160, 160);
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Cancel", 160, 228);
+    } else if (phase == 2) {
+        s_backbuffer.setTextColor(COLOR_YELLOW);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("Connecting...", 160, 90);
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("Please wait", 160, 120);
+        s_backbuffer.setTextColor(0x632C);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString("[BACK] Return to menu", 160, 228);
+    } else if (phase == 3 && connected) {
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.drawString("Connected!", 160, 74);
         char buf[48];
         s_backbuffer.setTextColor(COLOR_WHITE);
         s_backbuffer.setTextSize(2);
         snprintf(buf, sizeof(buf), "IP: %s", ip ? ip : "N/A");
-        s_backbuffer.drawString(buf, 160, 130);
-
+        s_backbuffer.drawString(buf, 160, 120);
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
-        s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
-    } else if (ap_active) {
-        s_backbuffer.setTextColor(COLOR_CYAN);
-        s_backbuffer.setTextSize(2);
-        s_backbuffer.setTextDatum(textdatum_t::middle_center);
-        s_backbuffer.drawString("WiFi Setup Active", 160, 30);
-
-        s_backbuffer.setTextColor(COLOR_WHITE);
-        s_backbuffer.setTextSize(2);
-        s_backbuffer.drawString("1. Connect phone to:", 160, 70);
-        s_backbuffer.setTextColor(COLOR_YELLOW);
-        s_backbuffer.setTextSize(3);
-        s_backbuffer.drawString("box-demo", 160, 100);
-
-        s_backbuffer.setTextColor(COLOR_WHITE);
-        s_backbuffer.setTextSize(2);
-        s_backbuffer.drawString("2. Open browser:", 160, 140);
-        s_backbuffer.setTextColor(COLOR_GREEN);
-        s_backbuffer.setTextSize(3);
-        s_backbuffer.drawString("192.168.4.1", 160, 170);
-
-        s_backbuffer.setTextColor(0x632C);
-        s_backbuffer.setTextSize(1);
-        s_backbuffer.drawString("[BACK] Cancel", 160, 225);
+        s_backbuffer.drawString("[START] Reconfigure  [BACK] Menu", 160, 228);
     } else {
         s_backbuffer.setTextColor(COLOR_WHITE);
         s_backbuffer.setTextSize(2);
-        s_backbuffer.setTextDatum(textdatum_t::middle_center);
-        s_backbuffer.drawString("Press", 160, 90);
+        s_backbuffer.drawString("Press [START]", 160, 90);
         s_backbuffer.setTextColor(COLOR_CYAN);
-        s_backbuffer.drawString("[START]", 160, 125);
-        s_backbuffer.setTextColor(COLOR_WHITE);
-        s_backbuffer.drawString("to begin WiFi setup", 160, 160);
-
+        s_backbuffer.drawString("to begin WiFi setup", 160, 120);
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
-        s_backbuffer.drawString("[BACK] Return to menu", 160, 225);
+        s_backbuffer.drawString("[BACK] Return to menu", 160, 228);
     }
 
     s_tft.startWrite();
@@ -788,7 +801,7 @@ void draw_record_main(void)
 
 // ==================== 录音界面 ====================
 
-void draw_record_capture(bool recording, int time_left)
+void draw_record_capture(bool recording, int time_left, const char *status)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
@@ -814,6 +827,13 @@ void draw_record_capture(bool recording, int time_left)
         s_backbuffer.setTextColor(COLOR_WHITE);
         s_backbuffer.setTextSize(2);
         s_backbuffer.drawString("seconds", 160, 148);
+
+        // 可选状态文本
+        if (status) {
+            s_backbuffer.setTextColor(COLOR_YELLOW);
+            s_backbuffer.setTextSize(1);
+            s_backbuffer.drawString(status, 160, 195);
+        }
 
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
@@ -875,7 +895,7 @@ void draw_record_playback(bool playing, bool finished)
 
     // 读取 WAV 文件时长
     int dur = 0;
-    FILE *f = fopen("/spiffs/recording.wav", "rb");
+    FILE *f = fopen("/sdcard/rec.wav", "rb");
     if (f) {
         fseek(f, 4, SEEK_SET);
         uint32_t fsize = 0; fread(&fsize, 4, 1, f);
@@ -954,6 +974,308 @@ void draw_record_playback(bool playing, bool finished)
         s_backbuffer.setTextSize(1);
         s_backbuffer.drawString("[BACK] Return", 160, 228);
     }
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== SD 卡状态页面 ====================
+
+void draw_sd_card_status(bool mounted, const char *name, const char *fs_type,
+                         int total_mb, int free_mb,
+                         int write_kbps, int read_kbps, bool testing)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("SD Card Status", 160, 16);
+    s_backbuffer.fillRect(20, 34, 280, 2, COLOR_WHITE);
+
+    char buf[48];
+    int y = 46;
+    s_backbuffer.setTextDatum(textdatum_t::top_left);
+
+    if (!mounted) {
+        s_backbuffer.setTextColor(COLOR_RED);
+        s_backbuffer.setTextSize(3);
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
+        s_backbuffer.drawString("No SD Card", 160, 100);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Insert FAT32 SD card & reboot", 160, 140);
+    } else {
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("Status:", 24, y);
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        s_backbuffer.drawString("Mounted", 120, y);
+        y += 28;
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Card:", 24, y);
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        snprintf(buf, sizeof(buf), "%s  [%s]", name, fs_type);
+        s_backbuffer.drawString(buf, 120, y);
+        y += 28;
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Total:", 24, y);
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        if (total_mb >= 1024) {
+            snprintf(buf, sizeof(buf), "%.1f GB", total_mb / 1024.0f);
+        } else {
+            snprintf(buf, sizeof(buf), "%d MB", total_mb);
+        }
+        s_backbuffer.drawString(buf, 120, y);
+        y += 26;
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Free:", 24, y);
+        s_backbuffer.setTextColor(COLOR_GREEN);
+        if (free_mb >= 1024) {
+            snprintf(buf, sizeof(buf), "%.1f GB", free_mb / 1024.0f);
+        } else {
+            snprintf(buf, sizeof(buf), "%d MB", free_mb);
+        }
+        s_backbuffer.drawString(buf, 120, y);
+        y += 32;
+
+        s_backbuffer.fillRect(20, y, 280, 1, 0x2104);
+        y += 8;
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Write:", 24, y);
+        if (write_kbps >= 0) {
+            s_backbuffer.setTextColor(COLOR_YELLOW);
+            snprintf(buf, sizeof(buf), "%d KB/s", write_kbps);
+        } else if (testing) {
+            s_backbuffer.setTextColor(COLOR_CYAN);
+            snprintf(buf, sizeof(buf), "Testing...");
+        } else {
+            s_backbuffer.setTextColor(COLOR_GRAY);
+            snprintf(buf, sizeof(buf), "-- (press START)");
+        }
+        s_backbuffer.drawString(buf, 120, y);
+        y += 28;
+
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.drawString("Read:", 24, y);
+        if (read_kbps >= 0) {
+            s_backbuffer.setTextColor(COLOR_YELLOW);
+            snprintf(buf, sizeof(buf), "%d KB/s", read_kbps);
+        } else if (testing) {
+            s_backbuffer.setTextColor(COLOR_CYAN);
+            snprintf(buf, sizeof(buf), "Testing...");
+        } else {
+            s_backbuffer.setTextColor(COLOR_GRAY);
+            snprintf(buf, sizeof(buf), "-- (press START)");
+        }
+        s_backbuffer.drawString(buf, 120, y);
+    }
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[START] Speed Test  [BACK] Return", 160, 220);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== SD 卡文件浏览器 ====================
+
+void draw_sd_card_browse(const char *path, void *ventries,
+                         int count, int selection, int scroll)
+{
+    sd_card_entry_t *entries = (sd_card_entry_t *)ventries;
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("SD Card Browse", 160, 16);
+    s_backbuffer.fillRect(20, 34, 280, 2, COLOR_WHITE);
+
+    // 当前路径
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    const char *show = path;
+    if (strlen(path) > 28) show = path + strlen(path) - 28;
+    s_backbuffer.drawString(show, 160, 42);
+
+    const int ROW_H = 24, MAX_VIS = 6, TX = 20;
+    int y = 50;
+
+    if (count <= 0) {
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(2);
+        s_backbuffer.drawString("(empty)", 160, 110);
+    } else {
+        if (scroll > count - MAX_VIS) scroll = count - MAX_VIS;
+        if (scroll < 0) scroll = 0;
+
+        s_backbuffer.setTextDatum(textdatum_t::top_left);
+        for (int i = 0; i < MAX_VIS && (i + scroll) < count; i++) {
+            int idx = i + scroll;
+            int ry = y + i * ROW_H;
+            bool sel = (idx == selection);
+
+            if (sel) s_backbuffer.fillRect(TX - 2, ry, 278, ROW_H, 0x18E3);
+
+            s_backbuffer.setTextSize(2);
+            if (entries[idx].is_dir) {
+                s_backbuffer.setTextColor(COLOR_YELLOW);
+                s_backbuffer.drawString("[D]", TX, ry + 2);
+                s_backbuffer.setTextColor(sel ? COLOR_WHITE : COLOR_CYAN);
+                s_backbuffer.drawString(entries[idx].name, TX + 48, ry + 2);
+            } else {
+                char buf[32];
+                if (entries[idx].size >= 1024 * 1024)
+                    snprintf(buf, sizeof(buf), "%.1fM", entries[idx].size / (1024.0f * 1024.0f));
+                else if (entries[idx].size >= 1024)
+                    snprintf(buf, sizeof(buf), "%uK", (unsigned)(entries[idx].size / 1024));
+                else
+                    snprintf(buf, sizeof(buf), "%uB", (unsigned)entries[idx].size);
+                s_backbuffer.setTextColor(COLOR_GRAY);
+                s_backbuffer.drawString(buf, TX, ry + 2);
+                s_backbuffer.setTextColor(sel ? COLOR_WHITE : 0xC618);
+                s_backbuffer.drawString(entries[idx].name, TX + 72, ry + 2);
+            }
+        }
+    }
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[L] Up  [R] Enter  [U/D] Move  [BACK] Status", 160, 220);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== ASR 准备中画面 ====================
+
+void draw_asr_preparing(void)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("ASR Voice", 160, 16);
+    s_backbuffer.fillRect(20, 32, 280, 2, COLOR_WHITE);
+
+    s_backbuffer.setTextColor(COLOR_YELLOW);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.drawString("Preparing...", 160, 100);
+
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("Initializing microphone", 160, 136);
+
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("[BACK] Cancel", 160, 228);
+
+    s_tft.startWrite();
+    s_backbuffer.pushSprite(&s_tft, 0, 0);
+    s_tft.endWrite();
+}
+
+// ==================== ASR 文本编辑器 ====================
+
+void draw_asr_text(const char *text, int cursor_byte, int *scroll_line, const char *status)
+{
+    s_backbuffer.fillScreen(COLOR_BLACK);
+
+    s_backbuffer.setTextColor(COLOR_CYAN);
+    s_backbuffer.setTextSize(2);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("ASR Voice", 160, 16);
+    s_backbuffer.fillRect(20, 32, 280, 2, COLOR_WHITE);
+
+    int y = 38;
+    if (status) {
+        s_backbuffer.setTextColor(COLOR_GRAY);
+        s_backbuffer.setTextSize(1);
+        s_backbuffer.drawString(status, 160, y + 6);
+        s_backbuffer.fillRect(20, y + 16, 280, 1, 0x2104);
+        y += 20;
+    }
+
+    const int LINE_H = 20, UNITS_PER_LINE = 36, MAX_VIS = 6, TX = 16, FW = 8;
+    const char *lines[80];
+    int total = 0;
+    const char *p = text;
+    while (*p && total < 80) {
+        lines[total++] = p;
+        int units = 0;
+        while (*p && *p != '\n') {
+            int cl = 1, cw = FW;  // ASCII: 1 unit (8px)
+            if ((*p & 0x80) != 0) {
+                cl = 1; while ((p[cl] & 0xC0) == 0x80) cl++;
+                cw = FW * 2;       // CJK: 2 units (16px)
+            }
+            if (units + cw > UNITS_PER_LINE * FW) break;
+            p += cl; units += cw;
+        }
+        if (*p == '\n') p++;
+    }
+
+    // 计算光标所在行（像素宽度感知）
+    int cl = 0, cpx = 0, bc = 0; p = text;
+    while (*p && bc < cursor_byte) {
+        int clen = 1, cw = FW;
+        if ((*p & 0x80) != 0) {
+            clen = 1; while ((p[clen] & 0xC0) == 0x80) clen++;
+            cw = FW * 2;
+        }
+        if (cpx + cw > UNITS_PER_LINE * FW || *p == '\n') {
+            cpx = 0; cl++;
+            if (*p == '\n') { p++; bc++; continue; }
+        }
+        bc += clen; cpx += cw; p += clen;
+    }
+
+    // 自动滚动：确保光标行在可见范围内
+    int sl_scroll = *scroll_line;
+    if (cl < sl_scroll) sl_scroll = cl;
+    if (cl >= sl_scroll + MAX_VIS) sl_scroll = cl - MAX_VIS + 1;
+    if (sl_scroll > total - MAX_VIS) sl_scroll = total - MAX_VIS;
+    if (sl_scroll < 0) sl_scroll = 0;
+    *scroll_line = sl_scroll;
+
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setFont(&fonts::efontCN_16);
+    for (int i = 0; i < MAX_VIS && (i + sl_scroll) < total; i++) {
+        int li = i + sl_scroll;
+        const char *s = lines[li], *e;
+        if (li + 1 < total) { e = lines[li + 1]; if (*(e - 1) == '\n') e--; }
+        else e = s + strlen(s);
+        int len = e - s; if (len > 63) len = 63;
+        char lb[64] = {0}; memcpy(lb, s, len);
+        s_backbuffer.setTextColor(COLOR_WHITE);
+        s_backbuffer.setTextDatum(textdatum_t::top_left);
+        s_backbuffer.drawString(lb, TX, y + i * LINE_H);
+    }
+
+    // 绘制光标
+    int sl = cl - sl_scroll;
+    if (sl >= 0 && sl < MAX_VIS) {
+        s_backbuffer.fillRect(TX + cpx, y + sl * LINE_H, 2, LINE_H, COLOR_RED);
+    }
+
+    s_backbuffer.setFont(nullptr);
+    s_backbuffer.setTextColor(0x632C);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::middle_center);
+    s_backbuffer.drawString("[START] Rec  [L/R] Move  [DOWN] Del  [BACK]", 160, 228);
 
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);

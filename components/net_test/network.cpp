@@ -192,6 +192,17 @@ bool wifi_is_connected(void)
     return s_connected;
 }
 
+void wifi_clear_credentials(void)
+{
+    s_connected = false;
+    s_status.ip[0] = '\0';
+    s_retry_num = MAX_RETRY;  // 阻止事件处理器自动重连
+    esp_wifi_disconnect();
+    esp_wifi_restore();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "WiFi credentials cleared");
+}
+
 void wifi_get_status(wifi_status_t *status)
 {
     if (!status) return;
@@ -270,6 +281,7 @@ static void ping_test_task(void *arg)
 
     snprintf(line, sizeof(line), "Connectivity test complete.");
     result_callback(line);
+    free(host);              // 释放 strdup 的 host 副本
     s_test_task = NULL;
     s_test_running = false;
     vTaskDelete(NULL);
@@ -335,6 +347,7 @@ static void http_test_task(void *arg)
 
     esp_http_client_cleanup(client);
     result_callback("HTTP test complete.");
+    free(url);               // 释放 strdup 的 url 副本
     s_test_task = NULL;
     s_test_running = false;
     vTaskDelete(NULL);
@@ -461,11 +474,15 @@ const char *network_get_results(void)
 
 void network_test_stop(void)
 {
+    s_test_running = false;             // 先设标志让任务自行退出
+    int timeout = 50;
+    while (s_test_task && timeout-- > 0) {
+        vTaskDelay(pdMS_TO_TICKS(10));  // 等待最多 500ms
+    }
     if (s_test_task) {
-        vTaskDelete(s_test_task);
+        vTaskDelete(s_test_task);       // 最后手段才强杀
         s_test_task = NULL;
     }
-    s_test_running = false;
 }
 
 bool network_test_running(void)

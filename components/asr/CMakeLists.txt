@@ -1,10 +1,8 @@
 idf_component_register(
     SRCS
-        "display.cpp"
+        "asr.cpp"
     INCLUDE_DIRS
         "include"
-        "."
     REQUIRES
-        LovyanGFX
-        storage
+        esp_http_client
 )

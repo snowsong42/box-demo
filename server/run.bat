@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-.venv\Scripts\python.exe asr_server.py
+"%~dp0.venv\Scripts\python.exe" "%~dp0asr_server.py"
 pause

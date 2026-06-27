@@ -10,7 +10,10 @@ GET  /      → 网页测试界面（可上传文件手动测试）
 """
 
 import os, sys, json, io, tempfile, traceback
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from zhconv import convert
+from config import DEEPSEEK_API_KEY
 from urllib.parse import urlparse
 
 # ==================== 模式检测 ====================
@@ -53,17 +56,96 @@ def recognize(audio_bytes):
         return _whisper_recognize(audio_bytes)
     return _mock_recognize()
 
-def _whisper_recognize(audio_bytes):
+_upload_count = 0
+
+def _deepseek_correct(text):
+    """DeepSeek AI 纠错：修正同音字/拼写、语法，失败时返回原文"""
+    if not text or len(text) < 2:
+        return text
     try:
+        import requests
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek-chat",
+                "messages": [{
+                    "role": "system",
+                    "content": (
+                        "你是语音识别纠错助手。根据输入语言自动选择纠错策略：\n"
+                        "- 中文：修正错别字、语法、同音词，使文本通顺\n"
+                        "- 英文：修正 spelling、grammar、homophones\n"
+                        "- 中英混合：分别按各自规则修正，保持原语言不变\n"
+                        "严格只输出纠错后的纯文本，不加任何解释、前缀或后缀。"
+                    )
+                }, {
+                    "role": "user", "content": text
+                }],
+                "temperature": 0.3,
+                "max_tokens": 500
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            corrected = resp.json()["choices"][0]["message"]["content"].strip()
+            print(f"[ASR]   DeepSeek: '{text}' -> '{corrected}'")
+            return corrected
+        else:
+            print(f"[ASR]   DeepSeek HTTP {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"[ASR]   DeepSeek error: {e}")
+    return text
+
+def _whisper_recognize(audio_bytes):
+    global _upload_count
+    _upload_count += 1
+    try:
+        # 检查 WAV 头
+        if len(audio_bytes) >= 44:
+            import struct
+            riff = audio_bytes[0:4]
+            fmt = audio_bytes[8:12]
+            channels = struct.unpack_from('<H', audio_bytes, 22)[0]
+            sr = struct.unpack_from('<I', audio_bytes, 24)[0]
+            bits = struct.unpack_from('<H', audio_bytes, 34)[0]
+            data_size = struct.unpack_from('<I', audio_bytes, 40)[0]
+            print(f"[ASR]   Header: {riff} {fmt} ch={channels} sr={sr} bits={bits} data={data_size}B")
+            if riff != b'RIFF':
+                print(f"[ASR]   WARNING: Not a valid WAV file!")
+        else:
+            print(f"[ASR]   WARNING: File too small, no valid header")
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
-        segments, info = WHISPER_MODEL.transcribe(tmp_path, language="zh",
+        segments, info = WHISPER_MODEL.transcribe(tmp_path, language=None,
                                                    beam_size=5, vad_filter=True)
+        # 仅允许中/英文：检测到其他语言则回退用中文重识别
+        if info.language not in ("zh", "en"):
+            print(f"[ASR]   Detected '{info.language}', falling back to en")
+            segments, info = WHISPER_MODEL.transcribe(tmp_path, language="en",
+                                                       beam_size=5, vad_filter=True)
         text = "".join(seg.text for seg in segments).strip()
+        text = convert(text, "zh-cn")
+        text = _deepseek_correct(text)
+        print(f"[ASR]   Result: '{text}' (lang={info.language}, prob={info.language_probability:.2f})")
+
+        # 保存 debug 音频到专用文件夹
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs("debug_wav", exist_ok=True)
+        save_path = f"debug_wav/{ts}_{_upload_count:03d}_{info.language}_{len(audio_bytes)}B.wav"
+        with open(save_path, "wb") as sf:
+            sf.write(audio_bytes)
+        print(f"[ASR]   Saved debug WAV to {save_path}")
+
         os.unlink(tmp_path)
         return text, None
     except Exception as e:
+        print(f"[ASR]   ERROR: {e}")
+        import traceback; traceback.print_exc()
         return "", str(e)
 
 _mock_count = 0
@@ -243,6 +325,7 @@ async function sendToASR(blob, resultId, statusId) {
 # ==================== HTTP Server ====================
 
 class ASRHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
         print(f"[{self.client_address[0]}] {args[0]}")
@@ -269,7 +352,7 @@ class ASRHandler(BaseHTTPRequestHandler):
         text, error = recognize(audio)
         resp = {"text": text, "err": 0 if not error else error}
         self._respond(200, "application/json; charset=utf-8",
-                      json.dumps(resp, ensure_ascii=False).encode())
+                      json.dumps(resp, ensure_ascii=False, separators=(',', ':')).encode())
 
     def _respond(self, code, ctype, body):
         self.send_response(code)
@@ -278,6 +361,7 @@ class ASRHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+        self.wfile.flush()
 
 # ==================== 主入口 ====================
 

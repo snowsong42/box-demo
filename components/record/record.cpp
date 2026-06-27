@@ -24,6 +24,7 @@ static TaskHandle_t s_record_task = nullptr;
 static bool s_recording = false;
 static int  s_record_elapsed_sec = 0;
 static int  s_record_max_sec = 0;
+static bool s_capturing = false;
 
 // File playback
 static TaskHandle_t s_play_task = nullptr;
@@ -63,7 +64,7 @@ static void write_wav_header(FILE *f, uint32_t data_size)
 static void record_task(void *arg)
 {
     const char *path = (const char *)arg;
-    if (!path) path = "/spiffs/recording.wav";
+    if (!path) path = "/sdcard/rec.wav";
 
     uint8_t placeholder[44] = {0};
     size_t total_data = 0;
@@ -82,15 +83,16 @@ static void record_task(void *arg)
     gpio_set_level(AMP_MUTE_GPIO, 0);
     i2s_channel_enable(s_rx_chan);
     vTaskDelay(pdMS_TO_TICKS(80));
+    s_capturing = true;
 
     while (s_recording) {
         size_t bytes_read = 0;
         esp_err_t err = i2s_channel_read(s_rx_chan, raw, sizeof(raw),
                                          &bytes_read, pdMS_TO_TICKS(20));
         if (err == ESP_OK && bytes_read > 0) {
-            int samples = bytes_read / 8;
+            int samples = bytes_read / 8;   // 32bit stereo = 8 bytes/frame
             for (int i = 0; i < samples; i++) {
-                pcm[i] = (int16_t)(raw[i * 2] >> 16);
+                pcm[i] = (int16_t)(raw[i * 2] >> 16);  // 左声道高16位
             }
             fwrite(pcm, 2, samples, f);
             total_data += samples * 2;
@@ -113,6 +115,7 @@ static void record_task(void *arg)
     ESP_LOGI(TAG, "Record done: %u bytes", (uint32_t)total_data);
 
 record_cleanup:
+    s_capturing = false;
     i2s_channel_disable(s_rx_chan);
     gpio_set_level(AMP_MUTE_GPIO, 1);
     s_record_task = nullptr;
@@ -196,8 +199,9 @@ bool record_start(const char *filepath, int max_sec)
     s_recording = true;
     s_record_max_sec = (max_sec > 0) ? max_sec : 15;
     s_record_elapsed_sec = 0;
+    s_capturing = false;
 
-    if (xTaskCreate(record_task, "record", 4096, (void *)filepath, 1, &s_record_task) != pdPASS) {
+    if (xTaskCreate(record_task, "record", 4096, (void *)filepath, 5, &s_record_task) != pdPASS) {
         s_recording = false;
         return false;
     }
@@ -216,6 +220,8 @@ void record_stop(void)
 bool record_is_recording(void) { return s_recording; }
 
 int  record_time_elapsed(void) { return s_record_elapsed_sec; }
+
+bool record_is_capturing(void) { return s_capturing; }
 
 bool record_play_start(const char *filepath)
 {
