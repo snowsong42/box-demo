@@ -19,12 +19,12 @@ static const char *TAG = "chat";
 static TaskHandle_t s_task = nullptr;
 static bool s_busy = false;
 static bool s_result_ready = false;
-static char s_reply[1024] = {0};
+static char s_reply[2048] = {0};
 static uint8_t *s_audio = nullptr;
 static int s_audio_len = 0;
 
 // ==================== 对话文本缓冲 ====================
-#define TEXT_BUF_SIZE 4096
+#define TEXT_BUF_SIZE 16384
 static char s_text[TEXT_BUF_SIZE] = {0};
 
 // ==================== HTTP 任务 ====================
@@ -222,7 +222,14 @@ void chat_text_append_ai(const char *text) {
 
 const char *chat_text_get(void) { return s_text; }
 
-void chat_text_clear(void) { s_text[0] = '\0'; }
+void chat_text_clear(void) {
+    s_text[0] = '\0';
+    if (s_audio) { free(s_audio); s_audio = nullptr; s_audio_len = 0; }
+}
+
+void chat_free_audio(void) {
+    if (s_audio) { free(s_audio); s_audio = nullptr; s_audio_len = 0; }
+}
 
 // ==================== UTF-8 工具 + 光标 ====================
 

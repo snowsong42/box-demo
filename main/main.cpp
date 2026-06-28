@@ -986,6 +986,7 @@ static void handle_chat(int btn)
                     fclose(af);
                     record_play_start("/sdcard/chat_reply.wav");
                 }
+                chat_free_audio();  // 用后即清
             }
             s_chat_phase = 0;
         }

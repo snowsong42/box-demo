@@ -48,6 +48,9 @@ const char *chat_text_get(void);
 void chat_text_clear(void);
 int  chat_text_len(void);
 
+/** @brief 释放 TTS 音频内存（收到回复保存后调用） */
+void chat_free_audio(void);
+
 // ==================== UTF-8 光标操作 ====================
 
 int  chat_cursor_prev(int byte_pos);
