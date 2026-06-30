@@ -6,6 +6,7 @@
 
 #include "display.h"
 #include "sd_card.h"
+#include "network.h"
 #include <lgfx/v1/lgfx_fonts.hpp>
 #include <stdio.h>
 #include <string.h>
@@ -18,10 +19,46 @@ static const char *TAG = "display";
 // ==================== 全局实例 ====================
 static LGFX s_tft;
 static LGFX_Sprite s_backbuffer(&s_tft);  // 320×240 PSRAM
+static bool s_cjk_font_loaded = false;     // 中文字体是否已加载
+
+// ==================== 中文字体（用于 WiFi SSID 等） ====================
+
+static void try_load_cjk_font(void)
+{
+    if (s_cjk_font_loaded) return;
+    // 尝试从 SD 卡加载中文字体（需要预先用 LovyanGFX 工具生成）
+    if (sd_card_mounted()) {
+        FILE *f = fopen("/sdcard/font.bin", "rb");
+        if (f) {
+            fclose(f);
+            s_tft.loadFont("/sdcard/font.bin");
+            s_backbuffer.loadFont("/sdcard/font.bin");
+            s_cjk_font_loaded = true;
+            ESP_LOGI(TAG, "CJK font loaded from /sdcard/font.bin");
+        }
+    }
+    if (!s_cjk_font_loaded) {
+        ESP_LOGW(TAG, "No /sdcard/font.bin found, CJK chars will show as garbled");
+    }
+}
 
 // ==================== GIF 帧存储 ====================
 static LGFX_Sprite s_gif_frames[GIF_FRAME_COUNT];
 static bool s_gif_loaded = false;
+
+// ==================== 内存监控 overlay ====================
+
+static void draw_mem_overlay(void) {
+    s_backbuffer.fillRect(198, 0, 122, 14, COLOR_BLACK);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "H:%zuK P:%zuK",
+             (size_t)(esp_get_free_heap_size() / 1024),
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
+    s_backbuffer.setTextColor(0x39C7);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.setTextDatum(textdatum_t::top_right);
+    s_backbuffer.drawString(buf, 318, 2);
+}
 
 // ==================== 初始化 ====================
 
@@ -166,6 +203,7 @@ void draw_menu(int selection, int scroll_offset)
     s_backbuffer.drawString("[UP][DOWN] Select    [START] Enter", 160, MENU_HINT_Y);
 
     // 推屏
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -182,7 +220,7 @@ void draw_img_browser(int img_index, int img_count,
 {
     int idx = img_index + 1;
     char path[32];
-    snprintf(path, sizeof(path), "/sdcard/%04d.png", idx);
+    snprintf(path, sizeof(path), "/sdcard/img/%04d.png", idx);
     ESP_LOGI(TAG, "IMG loading: %s", path);
 
     // 缓存 PNG 尺寸
@@ -243,8 +281,9 @@ void draw_img_browser(int img_index, int img_count,
     heap_caps_free(png_buf);
 
     s_backbuffer.setTextColor(0x632C);
-    s_backbuffer.drawString("[UP][DOWN] Prev/Next  [START] Audio  [BACK] Reset", 160, IMG_HINT_Y);
+    s_backbuffer.drawString("[UP][DOWN] Prev/Next  [BACK] Reset", 160, IMG_HINT_Y);
 
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -276,8 +315,9 @@ void draw_marquee_frame(uint16_t *raw_data, int scroll_offset)
 
     s_backbuffer.fillRect(0, 218, 320, 22, COLOR_BLACK);
     s_backbuffer.setTextColor(0x632C);
-    s_backbuffer.drawString("[UP][DOWN] Pause  [START] Audio  [BACK] Reset", 160, MARQUEE_HINT_Y);
+    s_backbuffer.drawString("[UP][DOWN] Pause  [BACK] Reset", 160, MARQUEE_HINT_Y);
 
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -299,7 +339,7 @@ int load_gif_frames(void)
         s_gif_frames[i].fillScreen(COLOR_BLACK);
 
         char path[32];
-        snprintf(path, sizeof(path), "/sdcard/gif_%04d.png", i + 1);
+        snprintf(path, sizeof(path), "/sdcard/gif/frame_%02d.png", i);
         FILE *fp = fopen(path, "rb");
         if (fp) {
             fseek(fp, 0, SEEK_END);
@@ -371,6 +411,7 @@ void draw_gif_frame(int frame_idx, int gif_speed)
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
     s_backbuffer.drawString("[UP][DOWN] Speed  [START] Audio  [BACK] Reset", 160, GIF_HINT_Y);
 
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -630,6 +671,8 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
+    try_load_cjk_font();
+
     s_backbuffer.setTextColor(COLOR_CYAN);
     s_backbuffer.setTextSize(2);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
@@ -645,9 +688,11 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
     s_backbuffer.setTextDatum(textdatum_t::top_left);
     s_backbuffer.drawString("SSID:", 24, y);
     s_backbuffer.setTextColor(COLOR_WHITE);
-    s_backbuffer.setTextSize(2);
+    if (s_cjk_font_loaded) s_backbuffer.setTextSize(1);
+    else s_backbuffer.setTextSize(2);
     snprintf(buf, sizeof(buf), "%s", ssid[0] ? ssid : "--");
     s_backbuffer.drawString(buf, 24, y + 12);
+    s_backbuffer.setTextSize(2);  // 恢复
 
     y += 48;
     s_backbuffer.setTextColor(COLOR_GRAY);
@@ -676,6 +721,14 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
     s_backbuffer.setTextSize(2);
     s_backbuffer.drawString(mac, 24, y + 12);
 
+    // 服务器地址（小字灰色）
+    y += 48;
+    s_backbuffer.setTextColor(COLOR_GRAY);
+    s_backbuffer.setTextSize(1);
+    s_backbuffer.drawString("ASR:", 24, y);
+    const char *asr = wifi_get_asr_url();
+    s_backbuffer.drawString(asr, 60, y);
+
     s_backbuffer.setTextColor(0x632C);
     s_backbuffer.setTextSize(1);
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
@@ -695,7 +748,9 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
 
 // ==================== WiFi 配置引导页 ====================
 
-void draw_wifi_config_page(int phase, bool connected, const char *ip)
+void draw_wifi_config_page(int phase, bool connected, const char *ip,
+                           bool check_done, bool baidu_ok,
+                           bool asr_ok, bool chat_ok)
 {
     s_backbuffer.fillScreen(COLOR_BLACK);
 
@@ -732,14 +787,37 @@ void draw_wifi_config_page(int phase, bool connected, const char *ip)
         s_backbuffer.setTextSize(1);
         s_backbuffer.drawString("[BACK] Return to menu", 160, 228);
     } else if (phase == 3 && connected) {
+        char buf[48];
         s_backbuffer.setTextColor(COLOR_GREEN);
         s_backbuffer.setTextSize(3);
-        s_backbuffer.drawString("Connected!", 160, 74);
-        char buf[48];
+        s_backbuffer.drawString("Connected!", 160, 64);
         s_backbuffer.setTextColor(COLOR_WHITE);
         s_backbuffer.setTextSize(2);
         snprintf(buf, sizeof(buf), "IP: %s", ip ? ip : "N/A");
-        s_backbuffer.drawString(buf, 160, 120);
+        s_backbuffer.drawString(buf, 160, 98);
+
+        // 连通性检查结果
+        s_backbuffer.setTextDatum(textdatum_t::top_left);
+        int cy = 128;
+        s_backbuffer.setTextSize(1);
+        if (!check_done) {
+            s_backbuffer.setTextColor(COLOR_GRAY);
+            s_backbuffer.drawString("Checking...", 48, cy);
+        } else {
+            // Internet
+            s_backbuffer.setTextColor(baidu_ok ? COLOR_GREEN : COLOR_RED);
+            s_backbuffer.drawString(baidu_ok ? "[OK] Internet" : "[X] Internet", 48, cy);
+            cy += 18;
+            // ASR Server
+            s_backbuffer.setTextColor(asr_ok ? COLOR_GREEN : COLOR_RED);
+            s_backbuffer.drawString(asr_ok ? "[OK] ASR Server" : "[X] ASR Server", 48, cy);
+            cy += 18;
+            // Chat Server
+            s_backbuffer.setTextColor(chat_ok ? COLOR_GREEN : COLOR_RED);
+            s_backbuffer.drawString(chat_ok ? "[OK] Chat Server" : "[X] Chat Server", 48, cy);
+        }
+
+        s_backbuffer.setTextDatum(textdatum_t::middle_center);
         s_backbuffer.setTextColor(0x632C);
         s_backbuffer.setTextSize(1);
         s_backbuffer.drawString("[START] Reconfigure  [BACK] Menu", 160, 228);
@@ -1253,6 +1331,7 @@ void draw_chat(const char *text, int cursor_byte, int *scroll_line, const char *
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
     s_backbuffer.drawString("[START] Rec  [UP] Send  [L/R] Move  [DOWN] Del  [BACK]", 160, 220);
 
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();
@@ -1376,6 +1455,7 @@ void draw_asr_text(const char *text, int cursor_byte, int *scroll_line, const ch
     s_backbuffer.setTextDatum(textdatum_t::middle_center);
     s_backbuffer.drawString("[START] Rec  [L/R] Move  [DOWN] Del  [BACK]", 160, 228);
 
+    draw_mem_overlay();
     s_tft.startWrite();
     s_backbuffer.pushSprite(&s_tft, 0, 0);
     s_tft.endWrite();

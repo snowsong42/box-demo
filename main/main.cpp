@@ -19,6 +19,8 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_http_client.h"
+#include "lwip/netdb.h"
 #include "nvs_flash.h"
 
 #include "buttons.h"
@@ -187,11 +189,10 @@ static void handle_img(int btn)
 
         for (int i = 0; i < s_img_count; i++) {
             char path[32];
-            snprintf(path, sizeof(path), "/sdcard/%04d.png", i + 1);
+            snprintf(path, sizeof(path), "/sdcard/img/%04d.png", i + 1);
             get_png_size(path, &s_img_w_cache[i], &s_img_h_cache[i]);
         }
 
-        if (!audio_is_running()) audio_start();
         draw_img_browser(s_img_index, s_img_count, s_img_w_cache, s_img_h_cache);
         return;
     }
@@ -202,9 +203,6 @@ static void handle_img(int btn)
             break;
         case BTN_D:
             s_img_index = (s_img_index + 1) % s_img_count;
-            break;
-        case BTN_S:
-            if (audio_is_running()) audio_stop(); else audio_start();
             break;
         default:
             if (btn == BTN_NONE) return;  // 无按键不重绘
@@ -220,6 +218,7 @@ static void handle_marquee(int btn)
     if (btn == BTN_B) {
         s_marquee_need_init = true;
         audio_stop();
+        if (s_marquee_raw) { heap_caps_free(s_marquee_raw); s_marquee_raw = nullptr; }
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -248,15 +247,12 @@ static void handle_marquee(int btn)
         }
         s_marquee_need_init = false;
 
-        if (!audio_is_running()) audio_start();
         draw_marquee_frame(s_marquee_raw, s_scroll_offset);
         return;
     }
 
     if (btn == BTN_U || btn == BTN_D) {
         s_marquee_paused = !s_marquee_paused;
-    } else if (btn == BTN_S) {
-        if (audio_is_running()) audio_stop(); else audio_start();
     }
 
     if (!s_marquee_paused) {
@@ -272,6 +268,7 @@ static void handle_gif(int btn)
     if (btn == BTN_B) {
         s_gif_need_init = true;
         audio_stop();
+        free_gif_frames();
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -1031,6 +1028,57 @@ static void handle_wifi_status(int btn)
 static int s_wifi_cfg_phase = 0;
 static bool s_wifi_cfg_first = true;
 
+// 连通性检查结果
+static bool s_net_check_done = false;
+static bool s_net_baidu_ok = false;
+static bool s_net_asr_ok  = false;
+static bool s_net_chat_ok = false;
+
+static void net_check_task(void *arg)
+{
+    // 等待 DHCP 分配 IP（WiFi 链路通 ≠ IP 到手）
+    wifi_status_t st;
+    for (int i = 0; i < 30; i++) {
+        wifi_get_status(&st);
+        if (st.ip[0] && st.ip[0] != '0') break;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    ESP_LOGI(TAG, "NetCheck: IP=%s, starting checks", st.ip);
+
+    // 1. 检查公网：DNS 解析 baidu.com（比 HTTP 更可靠，不会被 HTTPS 重定向坑）
+    struct hostent *h = gethostbyname("baidu.com");
+    s_net_baidu_ok = (h != NULL);
+    ESP_LOGI(TAG, "NetCheck: baidu.com DNS %s", s_net_baidu_ok ? "OK" : "FAIL");
+
+    // 2. 检查 ASR 服务器（禁用自动重定向，避免 HTTPS 陷阱）
+    esp_http_client_config_t cfg = {};
+    cfg.url = wifi_get_asr_url();
+    cfg.timeout_ms = 3000;
+    cfg.disable_auto_redirect = true;
+    esp_http_client_handle_t cli = esp_http_client_init(&cfg);
+    esp_http_client_set_method(cli, HTTP_METHOD_HEAD);
+    esp_err_t e = esp_http_client_perform(cli);
+    int status = esp_http_client_get_status_code(cli);
+    s_net_asr_ok = (e == ESP_OK && status > 0);
+    ESP_LOGI(TAG, "NetCheck: ASR %s (e=%d status=%d)", s_net_asr_ok ? "OK" : "FAIL", e, status);
+    esp_http_client_cleanup(cli);
+
+    // 3. 检查 Chat 服务器
+    cfg.url = wifi_get_chat_url();
+    cfg.timeout_ms = 3000;
+    cfg.disable_auto_redirect = true;
+    cli = esp_http_client_init(&cfg);
+    esp_http_client_set_method(cli, HTTP_METHOD_HEAD);
+    e = esp_http_client_perform(cli);
+    status = esp_http_client_get_status_code(cli);
+    s_net_chat_ok = (e == ESP_OK && status > 0);
+    ESP_LOGI(TAG, "NetCheck: Chat %s (e=%d status=%d)", s_net_chat_ok ? "OK" : "FAIL", e, status);
+    esp_http_client_cleanup(cli);
+
+    s_net_check_done = true;
+    vTaskDelete(NULL);
+}
+
 static void handle_wifi_config(int btn)
 {
     if (s_wifi_cfg_phase == 1 && wifi_prov_is_done()) {
@@ -1039,16 +1087,23 @@ static void handle_wifi_config(int btn)
     }
     if (s_wifi_cfg_phase == 2 && wifi_is_connected()) {
         s_wifi_cfg_phase = 3;
+        s_net_check_done = false;
+        xTaskCreate(net_check_task, "netchk", 4096, NULL, 1, NULL);
     }
     if (s_wifi_cfg_first) {
         s_wifi_cfg_first = false;
-        if (wifi_is_connected()) s_wifi_cfg_phase = 3;
+        if (wifi_is_connected()) {
+            s_wifi_cfg_phase = 3;
+            s_net_check_done = false;
+            xTaskCreate(net_check_task, "netchk", 4096, NULL, 1, NULL);
+        }
     }
 
     if (btn == BTN_B) {
         if (s_wifi_cfg_phase == 1) wifi_prov_web_stop();
         s_wifi_cfg_phase = 0;
         s_wifi_cfg_first = true;
+        s_net_check_done = false;
         s_current_state = STATE_MENU;
         draw_menu(s_menu_sel, s_menu_scroll);
         return;
@@ -1068,7 +1123,9 @@ static void handle_wifi_config(int btn)
     wifi_status_t st;
     wifi_get_status(&st);
     draw_wifi_config_page(s_wifi_cfg_phase, wifi_is_connected(),
-                          st.ip[0] ? st.ip : NULL);
+                          st.ip[0] ? st.ip : NULL,
+                          s_net_check_done, s_net_baidu_ok,
+                          s_net_asr_ok, s_net_chat_ok);
 }
 
 // ==================== 主入口 ====================

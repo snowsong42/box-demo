@@ -17,8 +17,10 @@
 extern "C" {
 #endif
 
-// 服务器地址（与 ASR 共用）
-#define CHAT_SERVER_URL "http://192.168.5.63:8080/chat"
+#include "network.h"
+
+// 服务器地址（从 NVS 读取，可在 WiFi 配网时设置）
+#define CHAT_SERVER_URL wifi_get_chat_url()
 
 // ==================== 发送与结果 ====================
 

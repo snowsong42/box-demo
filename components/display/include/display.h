@@ -173,7 +173,9 @@ void draw_wifi_status_big(const char *ssid, const char *ip, int rssi, const char
  * @param connected   WiFi 是否已连接
  * @param ip          连接后的 IP 地址（可为 NULL）
  */
-void draw_wifi_config_page(int phase, bool connected, const char *ip);
+void draw_wifi_config_page(int phase, bool connected, const char *ip,
+                           bool check_done, bool baidu_ok,
+                           bool asr_ok, bool chat_ok);
 
 // ==================== 录音播放 UI ====================
 

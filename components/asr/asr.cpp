@@ -45,7 +45,6 @@ static int utf8_str_len(const char *s) {
 
 static void upload_task(void *arg) {
     const char *path = (const char *)arg;
-    char *data = nullptr;
     esp_http_client_handle_t client = nullptr;
     esp_http_client_config_t cfg = {};
     int fsize = 0;
@@ -66,10 +65,6 @@ static void upload_task(void *arg) {
         fclose(f);
         goto done;
     }
-    data = (char *)malloc(fsize);
-    if (!data) { fclose(f); goto done; }
-    fread(data, 1, fsize, f);
-    fclose(f);
 
     ESP_LOGI(TAG, "Uploading %d bytes to %s", fsize, ASR_SERVER_URL);
 
@@ -80,12 +75,20 @@ static void upload_task(void *arg) {
 
     client = esp_http_client_init(&cfg);
     esp_http_client_set_header(client, "Content-Type", "audio/wav");
-    esp_http_client_set_post_field(client, data, fsize);
 
     err = esp_http_client_open(client, fsize);
     if (err == ESP_OK) {
-        int wlen = esp_http_client_write(client, data, fsize);
-        ESP_LOGI(TAG, "POST wrote %d/%d bytes", wlen, fsize);
+        // 分块流式上传（4KB 栈缓冲，消除 600KB malloc 峰值）
+        uint8_t chunk[4096];
+        int total_written = 0;
+        while (total_written < fsize) {
+            int rd = fread(chunk, 1, sizeof(chunk), f);
+            if (rd <= 0) break;
+            int wr = esp_http_client_write(client, (char *)chunk, rd);
+            if (wr < 0) { err = wr; break; }
+            total_written += wr;
+        }
+        ESP_LOGI(TAG, "POST wrote %d/%d bytes", total_written, fsize);
         int clen = esp_http_client_fetch_headers(client);
         ESP_LOGI(TAG, "HTTP %d, content-length=%d",
                  esp_http_client_get_status_code(client), clen);
@@ -115,12 +118,12 @@ static void upload_task(void *arg) {
         ESP_LOGE(TAG, "HTTP POST failed: %d", err);
     }
 
+    fclose(f);
     esp_http_client_cleanup(client);
-    free(data);
     s_result_ready = true;
 
 done:
-    free((void*)path);       // 释放 strdup 的路径副本
+    free((void*)path);
     if (s_last_result[0] == '\0') {
         strcpy(s_last_result, "Server unreachable");
     }

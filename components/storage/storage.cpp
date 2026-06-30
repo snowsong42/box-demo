@@ -42,7 +42,7 @@ int detect_img_count(void)
     int count = 0;
     for (int i = 1; i <= 99; i++) {
         char path[32];
-        snprintf(path, sizeof(path), "/sdcard/%04d.png", i);
+        snprintf(path, sizeof(path), "/sdcard/img/%04d.png", i);
         FILE *f = fopen(path, "r");
         if (f) {
             fclose(f);

@@ -121,6 +121,9 @@ void network_test_stop(void);
  */
 bool network_test_running(void);
 
+const char *wifi_get_asr_url(void);
+const char *wifi_get_chat_url(void);
+
 #ifdef __cplusplus
 }
 #endif

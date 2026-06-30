@@ -5,4 +5,5 @@ idf_component_register(
         "include"
     REQUIRES
         esp_http_client
+        net_test
 )

@@ -462,22 +462,90 @@ def main():
     _init_whisper()
 
     import socket
-    ip = socket.gethostbyname(socket.gethostname())
-    if ip.startswith("127."):
+
+    def _get_all_ips():
+        """枚举所有非回环 IPv4 地址，返回 (ip, default_ip) 列表"""
+        ips = []
+        try:
+            hostname = socket.gethostname()
+            addrs = socket.getaddrinfo(hostname, None, socket.AF_INET,
+                                       socket.SOCK_STREAM, 0, 0)
+            for addr in addrs:
+                ip = addr[4][0]
+                if not ip.startswith("127.") and ip not in ips:
+                    ips.append(ip)
+        except Exception:
+            pass
+
+        default_ip = ""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
             s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
+            default_ip = s.getsockname()[0]
             s.close()
+            if not default_ip.startswith("127.") and default_ip not in ips:
+                ips.insert(0, default_ip)
         except Exception:
-            ip = "localhost"
+            pass
 
-    print(f"\n{'='*50}")
+        if not ips:
+            ips.append("localhost")
+        return ips, default_ip
+
+    def _classify_ip(ip):
+        """给 IP 打标签，帮助用户识别哪个是真实可用的"""
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return ""
+        a, b = int(parts[0]), int(parts[1])
+        # 已知虚拟网卡/容器网段
+        if a == 10 and b in range(0, 256):
+            return " (可能是 VPN/虚拟网卡)"
+        if a == 172 and b in range(16, 32):
+            return " (可能是 Docker 网段)"
+        if a == 192 and b == 168:
+            c = int(parts[2])
+            if c in range(56, 100):
+                return " (可能是 VirtualBox 网段)"
+            if c == 0 or c == 1:
+                return ""
+            return " ★ 最可能"  # 192.168.x.x 最常见家用路由器
+        if a == 169 and b == 254:
+            return " (APIPA 自动配置, 不可用)"
+        return ""
+
+    ips, default_ip = _get_all_ips()
+
+    # 按优先级排序：默认路由排第一，192.168.x.x 其次
+    def _ip_sort_key(ip):
+        if ip == default_ip:
+            return 0
+        parts = ip.split(".")
+        if len(parts) == 4 and parts[0] == "192" and parts[1] == "168":
+            return 1
+        return 2
+
+    ips.sort(key=_ip_sort_key)
+
+    print(f"\n{'='*60}")
     print(f"  ASR Server Ready")
     print(f"  Mode:    {MODE}")
-    print(f"  Web UI:  http://{ip}:{port}")
-    print(f"  API:     POST http://{ip}:{port}/asr")
-    print(f"{'='*50}\n")
+    print(f"  Port:    {port}")
+    print(f"  Detected IPs:")
+    print(f"  {'─'*48}")
+    best_ip = ""
+    for ip in ips:
+        tag = _classify_ip(ip)
+        marker = "  ← 推荐" if "最可能" in tag else ("  ← 默认路由" if ip == default_ip else "")
+        print(f"  http://{ip}:{port}{tag}{marker}")
+        if "最可能" in tag and not best_ip:
+            best_ip = ip
+    if not best_ip:
+        best_ip = default_ip or (ips[0] if ips else "localhost")
+    print(f"  {'─'*48}")
+    print(f"  ESP32 配网页填写: http://{best_ip}:{port}/asr")
+    print(f"{'='*60}\n")
 
     server = HTTPServer(("0.0.0.0", port), ASRHandler)
     try:

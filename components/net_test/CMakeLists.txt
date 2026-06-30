@@ -12,4 +12,6 @@ idf_component_register(
         lwip
         esp_event
         esp_timer
+    EMBED_TXTFILES
+        prov.html
 )

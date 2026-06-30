@@ -10,8 +10,10 @@
 extern "C" {
 #endif
 
-// 服务器地址（修改为你的 PC IP）
-#define ASR_SERVER_URL "http://192.168.5.63:8080/asr"
+#include "network.h"
+
+// 服务器地址（从 NVS 读取，可在 WiFi 配网时设置）
+#define ASR_SERVER_URL wifi_get_asr_url()
 
 // ==================== 上传与结果 ====================
 

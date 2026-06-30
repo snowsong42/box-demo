@@ -7,4 +7,5 @@ idf_component_register(
     REQUIRES
         LovyanGFX
         storage
+        net_test
 )

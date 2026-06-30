@@ -35,6 +35,8 @@ static const char *TAG = "network";
 #define NVS_NAMESPACE       "wifi_creds"
 #define NVS_KEY_SSID        "ssid"
 #define NVS_KEY_PASS        "pass"
+#define NVS_KEY_ASR_URL     "asr_url"
+#define NVS_KEY_CHAT_URL    "chat_url"
 #define PROV_AP_SSID        CONFIG_NETWORK_PROV_AP_SSID
 #define PROV_AP_PASS        "12345678"
 #define MAX_RETRY           5
@@ -200,6 +202,16 @@ void wifi_clear_credentials(void)
     esp_wifi_disconnect();
     esp_wifi_restore();
     vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 同时清除 ASR/Chat 服务器 URL，下次读取时回归默认值
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_key(nvs, NVS_KEY_ASR_URL);
+        nvs_erase_key(nvs, NVS_KEY_CHAT_URL);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
     ESP_LOGI(TAG, "WiFi credentials cleared");
 }
 
@@ -296,7 +308,10 @@ void ping_start(const char *host, int count, net_result_cb_t callback)
     s_test_running = true;
 
     char *host_copy = strdup(host ? host : CONFIG_NETWORK_DEFAULT_HOST);
-    xTaskCreate(ping_test_task, "ping_test", 4096, host_copy, 5, &s_test_task);
+    if (xTaskCreate(ping_test_task, "ping_test", 4096, host_copy, 5, &s_test_task) != pdPASS) {
+        free(host_copy);
+        s_test_running = false;
+    }
 }
 
 // ==================== HTTP GET 测试 ====================
@@ -362,7 +377,10 @@ void http_get_start(const char *url, net_result_cb_t callback)
     s_test_running = true;
 
     char *url_copy = strdup(url ? url : "http://httpbin.org/get");
-    xTaskCreate(http_test_task, "http_test", 8192, url_copy, 5, &s_test_task);
+    if (xTaskCreate(http_test_task, "http_test", 8192, url_copy, 5, &s_test_task) != pdPASS) {
+        free(url_copy);
+        s_test_running = false;
+    }
 }
 
 // ==================== TCP 客户端测试 ====================
@@ -462,7 +480,11 @@ void tcp_client_start(const char *host, int port, const char *data, net_result_c
     char params[96];
     snprintf(params, sizeof(params), "%s:%d", host ? host : CONFIG_NETWORK_DEFAULT_HOST,
              port > 0 ? port : 80);
-    xTaskCreate(tcp_test_task, "tcp_test", 4096, strdup(params), 5, &s_test_task);
+    char *params_copy = strdup(params);
+    if (xTaskCreate(tcp_test_task, "tcp_test", 4096, params_copy, 5, &s_test_task) != pdPASS) {
+        free(params_copy);
+        s_test_running = false;
+    }
 }
 
 // ==================== 测试控制 ====================
@@ -499,62 +521,16 @@ static volatile bool s_prov_done = false;
 
 bool wifi_prov_is_done(void) { return s_prov_done; }
 
-// 配网页 HTML（内嵌）
-static const char PROV_HTML[] = R"raw(
-<!DOCTYPE html><html><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>box-demo WiFi Setup</title>
-<style>
-body{font-family:Arial;background:#1a1a2e;color:#eee;margin:0;padding:20px}
-h2{color:#00d4ff;text-align:center}
-.card{background:#16213e;border-radius:10px;padding:16px;margin:12px 0}
-label{display:block;margin:8px 0 4px;color:#aaa}
-select,input{width:100%;padding:10px;border-radius:6px;border:none;background:#0f3460;color:#fff;font-size:16px;box-sizing:border-box}
-button{width:100%;padding:12px;border:none;border-radius:8px;background:#00d4ff;color:#000;font-size:18px;font-weight:bold;margin-top:12px;cursor:pointer}
-.btn2{background:#0f3460;color:#00d4ff}
-#status{margin-top:12px;text-align:center;font-size:14px;color:#aaa}
-</style></head><body>
-<h2>box-demo WiFi Setup</h2>
-<div class="card">
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-<label style="margin:0;color:#aaa">WiFi Networks</label>
-<button class="btn2" onclick="scan()" style="width:auto;padding:5px 14px;margin:0;font-size:13px">Scan</button>
-</div>
-<select id="ssid_list" onchange="document.getElementById('ssid').value=this.value">
-<option value="">-- Press Scan --</option></select>
-<label>or enter SSID</label>
-<input id="ssid" placeholder="WiFi name">
-<label>Password (AP: 12345678)</label>
-<input id="pass" type="password" placeholder="WiFi password">
-<button onclick="connect()">Connect</button>
-<div id="status"></div>
-</div>
-<script>
-async function scan(){
- document.getElementById('ssid_list').innerHTML='<option>Scanning...</option>';
- try{
-  let r=await fetch('/scan');let d=await r.json();
-  let s=document.getElementById('ssid_list');
-  s.innerHTML=d.map(w=>`<option value="${w.ssid}">${w.ssid} (${w.rssi}dBm)</option>`).join('');
- }catch(e){document.getElementById('ssid_list').innerHTML='<option>Scan failed</option>';}
-}
-function connect(){
- let ssid=document.getElementById('ssid').value;
- let pass=document.getElementById('pass').value;
- if(!ssid){alert('Enter SSID');return;}
- document.getElementById('status').innerText='Connecting...';
- fetch('/connect',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({ssid:ssid,password:pass})})
- .then(r=>r.text()).then(t=>{document.getElementById('status').innerText=t;});
-}
-</script></body></html>
-)raw";
+// 配网页 HTML（编译时从 prov.html 嵌入）
+extern const uint8_t prov_html_start[] asm("_binary_prov_html_start");
+extern const uint8_t prov_html_end[]   asm("_binary_prov_html_end");
 
 /* GET / */
 static esp_err_t prov_root_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, PROV_HTML, strlen(PROV_HTML));
+    httpd_resp_send(req, (const char *)prov_html_start,
+                    prov_html_end - prov_html_start);
     return ESP_OK;
 }
 
@@ -622,8 +598,11 @@ static esp_err_t prov_connect_handler(httpd_req_t *req)
 
     // 简单 JSON 解析：提取 "ssid":"..." 和 "password":"..."
     char ssid[33] = {0}, pass[65] = {0};
+    char asr_url[128] = {0}, chat_url[128] = {0};
     char *sp = strstr(buf, "\"ssid\"");
     char *pp = strstr(buf, "\"password\"");
+    char *ap = strstr(buf, "\"asr_url\"");
+    char *cp = strstr(buf, "\"chat_url\"");
     if (sp) {
         sp = strchr(sp + 6, '"'); if (sp) sp++;
         char *end = strchr(sp, '"');
@@ -636,6 +615,20 @@ static esp_err_t prov_connect_handler(httpd_req_t *req)
         char *end = strchr(pp, '"');
         if (pp && end && (end - pp) < 64) {
             memcpy(pass, pp, end - pp);
+        }
+    }
+    if (ap) {
+        ap = strchr(ap + 9, '"'); if (ap) ap++;
+        char *end = strchr(ap, '"');
+        if (ap && end && (end - ap) < 128) {
+            memcpy(asr_url, ap, end - ap);
+        }
+    }
+    if (cp) {
+        cp = strchr(cp + 11, '"'); if (cp) cp++;
+        char *end = strchr(cp, '"');
+        if (cp && end && (end - cp) < 128) {
+            memcpy(chat_url, cp, end - cp);
         }
     }
 
@@ -651,6 +644,8 @@ static esp_err_t prov_connect_handler(httpd_req_t *req)
     nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     nvs_set_str(nvs, NVS_KEY_SSID, ssid);
     nvs_set_str(nvs, NVS_KEY_PASS, pass);
+    if (asr_url[0])  nvs_set_str(nvs, NVS_KEY_ASR_URL, asr_url);
+    if (chat_url[0]) nvs_set_str(nvs, NVS_KEY_CHAT_URL, chat_url);
     nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -665,6 +660,29 @@ static esp_err_t prov_connect_handler(httpd_req_t *req)
 
     httpd_resp_sendstr(req, "OK: Connecting...");
     s_prov_done = true;  // 通知主循环清理
+    return ESP_OK;
+}
+
+/* GET /get-urls — 返回当前存储的 ASR/Chat 服务器地址 */
+static esp_err_t prov_get_urls_handler(httpd_req_t *req)
+{
+    char asr_url[128] = {0}, chat_url[128] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(asr_url);
+        if (nvs_get_str(nvs, NVS_KEY_ASR_URL, asr_url, &len) != ESP_OK)
+            asr_url[0] = '\0';
+        len = sizeof(chat_url);
+        if (nvs_get_str(nvs, NVS_KEY_CHAT_URL, chat_url, &len) != ESP_OK)
+            chat_url[0] = '\0';
+        nvs_close(nvs);
+    }
+    char json[384];
+    snprintf(json, sizeof(json),
+             "{\"asr_url\":\"%s\",\"chat_url\":\"%s\"}",
+             asr_url, chat_url);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
     return ESP_OK;
 }
 
@@ -697,9 +715,11 @@ void wifi_prov_web_start(void)
     httpd_uri_t root_uri = { .uri = "/",       .method = HTTP_GET,  .handler = prov_root_handler, .user_ctx = NULL };
     httpd_uri_t scan_uri = { .uri = "/scan",   .method = HTTP_GET,  .handler = prov_scan_handler, .user_ctx = NULL };
     httpd_uri_t conn_uri = { .uri = "/connect",.method = HTTP_POST, .handler = prov_connect_handler, .user_ctx = NULL };
+    httpd_uri_t urls_uri = { .uri = "/get-urls",.method = HTTP_GET, .handler = prov_get_urls_handler, .user_ctx = NULL };
     httpd_register_uri_handler(s_prov_server, &root_uri);
     httpd_register_uri_handler(s_prov_server, &scan_uri);
     httpd_register_uri_handler(s_prov_server, &conn_uri);
+    httpd_register_uri_handler(s_prov_server, &urls_uri);
 
     ESP_LOGI(TAG, "Provisioning web server started on 192.168.4.1");
 }
@@ -711,4 +731,32 @@ void wifi_prov_web_stop(void)
         s_prov_server = NULL;
     }
     ESP_LOGI(TAG, "Provisioning stopped");
+}
+
+// ==================== 服务器 URL 存取 ====================
+
+const char *wifi_get_asr_url(void)
+{
+    static char s_asr_url[128] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(s_asr_url);
+        if (nvs_get_str(nvs, NVS_KEY_ASR_URL, s_asr_url, &len) != ESP_OK)
+            s_asr_url[0] = '\0';
+        nvs_close(nvs);
+    }
+    return s_asr_url[0] ? s_asr_url : "http://192.168.5.63:8080/asr";
+}
+
+const char *wifi_get_chat_url(void)
+{
+    static char s_chat_url[128] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(s_chat_url);
+        if (nvs_get_str(nvs, NVS_KEY_CHAT_URL, s_chat_url, &len) != ESP_OK)
+            s_chat_url[0] = '\0';
+        nvs_close(nvs);
+    }
+    return s_chat_url[0] ? s_chat_url : "http://192.168.5.63:8080/chat";
 }

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>box-demo WiFi Setup</title>
+<style>
+body{font-family:Arial;background:#1a1a2e;color:#eee;margin:0;padding:20px}
+h2{color:#00d4ff;text-align:center}
+.card{background:#16213e;border-radius:10px;padding:16px;margin:12px 0}
+label{display:block;margin:8px 0 4px;color:#aaa}
+select,input{width:100%;padding:10px;border-radius:6px;border:none;background:#0f3460;color:#fff;font-size:16px;box-sizing:border-box}
+button{width:100%;padding:12px;border:none;border-radius:8px;background:#00d4ff;color:#000;font-size:18px;font-weight:bold;margin-top:12px;cursor:pointer}
+.btn2{background:#0f3460;color:#00d4ff}
+#status{margin-top:12px;text-align:center;font-size:14px;color:#aaa}
+</style></head><body>
+<h2>box-demo WiFi Setup</h2>
+<div class="card">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+<label style="margin:0;color:#aaa">WiFi Networks</label>
+<button class="btn2" onclick="scan()" style="width:auto;padding:5px 14px;margin:0;font-size:13px">Scan</button>
+</div>
+<select id="ssid_list" onchange="document.getElementById('ssid').value=this.value">
+<option value="">-- Press Scan --</option></select>
+<label>or enter SSID</label>
+<input id="ssid" placeholder="WiFi name">
+<label>Password (AP: 12345678)</label>
+<input id="pass" type="password" placeholder="WiFi password">
+<label>ASR Server URL</label>
+<input id="asr_url" placeholder="http://192.168.5.63:8080/asr">
+<label>Chat Server URL</label>
+<input id="chat_url" placeholder="http://192.168.5.63:8080/chat">
+<button onclick="connect()">Connect</button>
+<div id="status"></div>
+</div>
+<script>
+async function loadUrls(){
+ try{
+  let r=await fetch('/get-urls');let d=await r.json();
+  let def_asr='http://192.168.5.63:8080/asr';
+  let def_chat='http://192.168.5.63:8080/chat';
+  document.getElementById('asr_url').value=d.asr_url||def_asr;
+  document.getElementById('chat_url').value=d.chat_url||def_chat;
+ }catch(e){}
+}
+async function scan(){
+ document.getElementById('ssid_list').innerHTML='<option>Scanning...</option>';
+ try{
+  let r=await fetch('/scan');let d=await r.json();
+  let s=document.getElementById('ssid_list');
+  s.innerHTML=d.map(w=>`<option value="${w.ssid}">${w.ssid} (${w.rssi}dBm)</option>`).join('');
+  if(d.length>0){
+   s.selectedIndex=1;
+   document.getElementById('ssid').value=d[0].ssid;
+  }
+ }catch(e){document.getElementById('ssid_list').innerHTML='<option>Scan failed</option>';}
+}
+function connect(){
+ let ssid=document.getElementById('ssid').value;
+ let pass=document.getElementById('pass').value;
+ let asr_url=document.getElementById('asr_url').value;
+ let chat_url=document.getElementById('chat_url').value;
+ if(!ssid){alert('Enter SSID');return;}
+ document.getElementById('status').innerText='Connecting...';
+ fetch('/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({ssid:ssid,password:pass,asr_url:asr_url,chat_url:chat_url})})
+ .then(r=>r.text()).then(t=>{document.getElementById('status').innerText=t;});
+}
+loadUrls();
+</script></body></html>
